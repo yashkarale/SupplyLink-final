@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+ml-service/.venv/
+
+# Build outputs
+client/dist/
+server/.env
+ml-service/.env
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# Mongo / local data
+*.local
