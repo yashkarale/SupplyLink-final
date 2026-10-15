@@ -4,6 +4,8 @@ import { useState } from "react";
 import AppSidebar from "./AppSidebar";
 import AppHeader from "./AppHeader";
 
+const currentYear = new Date().getFullYear();
+
 export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setTheme] = useState("light");
@@ -22,7 +24,7 @@ export default function AppLayout() {
             <Outlet context={{ theme }} />
           </div>
           <footer className={`mt-12 flex flex-col gap-2 border-t py-5 text-[11px] sm:flex-row sm:items-center sm:justify-between ${theme === "dark" ? "border-[#21382d] text-[#9aa49b]" : "border-[#e6ebe4] text-[#9aa49b]"}`}>
-            <span>© {new Date().getFullYear()} Supply Link. Built for independent sellers.</span>
+            <span>© {currentYear} Supply Link. Built for independent sellers.</span>
             <span>Seller Studio · Live workspace</span>
           </footer>
         </main>

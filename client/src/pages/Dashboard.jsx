@@ -111,7 +111,7 @@ export default function Dashboard() {
           salesSeries: Array.isArray(analytics.salesSeries) ? analytics.salesSeries : [],
           recentOrders: Array.isArray(analytics.recentOrders) ? analytics.recentOrders : [],
         });
-      } catch (error) {
+      } catch {
         setSummary({
           totalSales: 0,
           totalOrders: 0,
@@ -140,8 +140,6 @@ export default function Dashboard() {
   );
 
   const revenueValue = formatMoney(summary.totalSales);
-  const averageOrder = summary.totalOrders ? formatMoney(summary.totalSales / summary.totalOrders) : formatMoney(0);
-
   return (
     <main className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-9 lg:py-8">
       <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">

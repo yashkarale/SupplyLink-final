@@ -3,11 +3,14 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import morgan from "morgan";
+import mongoose from "mongoose";
 import authRoutes from "./routes/authRoutes.js";
 import sellerRoutes from "./routes/sellerRoutes.js";
 import productRoutes from "./routes/productRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
+import billingRoutes from "./routes/billingRoutes.js";
 import storeRoutes from "./routes/storeRoutes.js";
+import { handleResendWebhook } from "./controllers/emailWebhookController.js";
 
 const app = express();
 
@@ -18,7 +21,21 @@ const clientOrigins = (process.env.CLIENT_URL || "http://localhost:5173")
 
 app.disable("x-powered-by");
 app.use(helmet({ crossOriginResourcePolicy: false }));
-app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+morgan.token("safe-url", (req) => {
+  try {
+    const url = new URL(req.originalUrl || req.url || "/", "http://localhost");
+    for (const key of ["password", "email", "token", "signature", "secret", "key", "phone", "whatsapp"]) {
+      if (url.searchParams.has(key)) url.searchParams.set(key, "[redacted]");
+    }
+    url.pathname = url.pathname.replace(/(\/api\/orders\/track\/)[^/?]+/i, "$1[redacted]");
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return "[invalid-url]";
+  }
+});
+app.use(morgan(process.env.NODE_ENV === "production"
+  ? ':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length]'
+  : ':method :safe-url :status :response-time ms - :res[content-length]'));
 
 app.use(
   cors({
@@ -48,7 +65,12 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({
+  limit: "1mb",
+  verify: (req, res, buffer) => {
+    if (req.originalUrl.split("?")[0] === "/api/webhooks/resend") req.rawBody = Buffer.from(buffer);
+  },
+}));
 app.use(express.urlencoded({ extended: true }));
 
 app.get("/api/health", (req, res) => {
@@ -60,11 +82,23 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+app.get("/api/ready", (req, res) => {
+  const databaseReady = mongoose.connection.readyState === 1;
+  res.status(databaseReady ? 200 : 503).json({
+    success: databaseReady,
+    status: databaseReady ? "ready" : "not_ready",
+    checks: { database: databaseReady ? "connected" : "disconnected" },
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.use("/api/auth", authRoutes);
 app.use("/api/sellers", sellerRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/billing", billingRoutes);
 app.use("/api/store", storeRoutes);
+app.post("/api/webhooks/resend", handleResendWebhook);
 
 app.use((req, res) => {
   res.status(404).json({

@@ -27,7 +27,7 @@ export default function Inventory() {
         const response = await fetchProducts();
         const list = Array.isArray(response?.products) ? response.products : [];
         setProducts(list.map(normalizeProduct));
-      } catch (error) {
+      } catch {
         setProducts([]);
       }
     };
@@ -53,7 +53,7 @@ export default function Inventory() {
       }));
 
       setMessage("Inventory updated successfully.");
-    } catch (error) {
+    } catch {
       setProducts((prev) => prev.map((product) => product.id === id ? { ...product, stock: nextValue, status: nextValue ? "Active" : "Out of stock" } : product));
       setMessage("Updated locally. The backend rejected the stock change.");
     }

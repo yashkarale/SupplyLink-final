@@ -63,8 +63,34 @@ const sellerSchema = new mongoose.Schema(
     ],
     plan: {
       type: String,
-      enum: ["free", "starter", "pro"],
+      enum: ["free", "launch", "scale"],
       default: "free",
+    },
+    subscriptionStatus: {
+      type: String,
+      enum: ["inactive", "active", "payment_pending"],
+      default: "inactive",
+    },
+    lastOrderId: {
+      type: String,
+      default: "",
+    },
+    lastPaymentId: {
+      type: String,
+      default: "",
+    },
+    planUpdatedAt: {
+      type: Date,
+      default: null,
+    },
+    planExpiresAt: {
+      type: Date,
+      default: null,
+    },
+    productLimitLockVersion: {
+      type: Number,
+      default: 0,
+      select: false,
     },
     isPublished: {
       type: Boolean,

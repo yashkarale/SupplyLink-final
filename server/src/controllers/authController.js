@@ -12,7 +12,7 @@ export const register = async (req, res) => {
       typeof email !== "string" ||
       typeof password !== "string" ||
       !name.trim() ||
-      !email.trim() ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) ||
       password.length < 8
     ) {
       return res.status(400).json({
@@ -74,24 +74,10 @@ export const register = async (req, res) => {
 
 export const login = async (req, res) => {
   try {
-    const bodyEmail = req.body?.email;
-    const bodyPassword = req.body?.password;
-    const queryEmail = req.query?.email;
-    const queryPassword = req.query?.password;
+    const email = typeof req.body?.email === "string" ? req.body.email : "";
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
 
-    const email = typeof bodyEmail === "string"
-      ? bodyEmail
-      : typeof queryEmail === "string"
-        ? queryEmail
-        : "";
-
-    const password = typeof bodyPassword === "string"
-      ? bodyPassword
-      : typeof queryPassword === "string"
-        ? queryPassword
-        : "";
-
-    if (!email.trim() || !password) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || !password) {
       return res.status(400).json({
         message: "Email and password are required"
       });

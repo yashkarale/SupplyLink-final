@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowRight, Building2, CheckCircle2, Copy, ExternalLink, Sparkles } from "lucide-react";
+import { ArrowRight, Building2, CheckCircle2, ExternalLink, Sparkles } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { onboardSeller } from "../services/api";
 import { getStoreUrl, slugify } from "../utils/slugify";
@@ -11,7 +11,6 @@ export default function OnboardingPage() {
     businessName: "",
     storeSlug: "",
     category: "Fashion",
-    plan: "starter",
     whatsapp: "",
     phone: "",
     description: "",
@@ -65,7 +64,7 @@ export default function OnboardingPage() {
       setCopyStatus("copied");
       notifyUser({ title: "Link copied", message: "Your store URL is ready to share." });
       window.setTimeout(() => setCopyStatus("idle"), 1800);
-    } catch (copyError) {
+    } catch {
       setCopyStatus("failed");
       notifyUser({
         title: "Copy unavailable",
@@ -92,7 +91,6 @@ export default function OnboardingPage() {
         description: form.description.trim(),
         category: form.category.trim(),
         faqs: form.faqs.trim(),
-        plan: form.plan.trim().toLowerCase(),
       };
 
       await onboardSeller(payload);
@@ -177,24 +175,21 @@ export default function OnboardingPage() {
                   </div>
 
                   <div className="field-group">
-                    <label>Plan</label>
-                    <select name="plan" value={form.plan} onChange={handleChange}>
-                      <option value="free">Free</option>
-                      <option value="starter">Starter</option>
-                      <option value="pro">Pro</option>
-                    </select>
+                    <label>Subscription</label>
+                    <p className="rounded-xl border border-[#e1e8df] bg-[#f8faf8] px-3 py-3 text-sm text-[#516658]">Start with the free plan. Choose a paid plan later through Razorpay in Billing.</p>
                   </div>
                 </div>
 
                 <div className="field-row">
                   <div className="field-group">
                     <label>Phone</label>
-                    <input name="phone" value={form.phone} onChange={handleChange} placeholder="+91 90000 00000" required />
+                    <input name="phone" type="tel" value={form.phone} onChange={handleChange} placeholder="+919000000000" pattern="\+[1-9][0-9]{7,14}" required />
                   </div>
 
                   <div className="field-group">
                     <label>WhatsApp</label>
-                    <input name="whatsapp" value={form.whatsapp} onChange={handleChange} placeholder="+91 98765 43210" required />
+                    <input name="whatsapp" type="tel" value={form.whatsapp} onChange={handleChange} placeholder="+919876543210" pattern="\+[1-9][0-9]{7,14}" required />
+                    <small>Use the full international number, including country code. For example, India uses +91 followed by a 10-digit mobile number.</small>
                   </div>
                 </div>
 

@@ -1,23 +1,64 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { Bell, Check, Globe, LockKeyhole, Store, UserRound } from "lucide-react";
 import PageHeader from "../components/ui/PageHeader";
+import { getSellerProfile, updateSellerStoreSettings } from "../services/api";
 import { getStoreUrl } from "../utils/slugify";
 
 export default function Settings() {
   const { theme = "light" } = useOutletContext() || {};
   const isDark = theme === "dark";
-  const [profile, setProfile] = useState({ name: "Yash Karale", email: "seller@example.com", storeName: "My Store", slug: "my-store", description: "Quality products, thoughtfully selected." });
+  const [profile, setProfile] = useState(null);
   const [preferences, setPreferences] = useState({ orderAlerts: true, stockAlerts: true, weeklyReport: false });
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  const updateProfile = (e) => {
+  useEffect(() => {
+    let active = true;
+    getSellerProfile()
+      .then(({ seller }) => {
+        if (!active) return;
+        if (!seller) {
+          setError("Complete seller setup before changing your store settings.");
+          return;
+        }
+        setProfile(seller);
+      })
+      .catch((requestError) => {
+        if (active) setError(requestError?.response?.data?.message || "Unable to load your store settings.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
+
+  const updateProfile = async (e) => {
     e.preventDefault();
-    setSaved(true);
+    if (!profile) return;
+    setSaving(true);
+    setSaved(false);
+    setError("");
+    try {
+      const { seller } = await updateSellerStoreSettings({
+        businessName: profile.businessName,
+        storeSlug: profile.storeSlug,
+        description: profile.description,
+        whatsapp: profile.whatsapp,
+      });
+      setProfile(seller);
+      setSaved(true);
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || "Unable to save your store settings.");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const previewUrl = getStoreUrl(profile.slug || "my-store");
+  const previewUrl = getStoreUrl(profile?.storeSlug);
   const fieldClass = isDark
     ? "mt-2 w-full rounded-xl border border-[#2b423a] bg-[#0f1f1a] px-3.5 py-3 text-sm text-[#edf5ee] outline-none transition placeholder:text-[#7c8d83] focus:border-[#7fb895] focus:ring-2 focus:ring-[#7fb895]/10"
     : "mt-2 w-full rounded-xl border border-[#e1e8df] bg-white px-3.5 py-3 text-sm text-[#354238] outline-none transition focus:border-[#659873] focus:ring-2 focus:ring-[#659873]/10";
@@ -34,6 +75,10 @@ export default function Settings() {
   const mutedTextClass = isDark ? "text-[#a3b6a8]" : "text-[#909b91]";
   const sectionTitleClass = isDark ? "text-sm font-bold text-[#edf5ee]" : "text-sm font-bold text-[#26372b]";
   const previewBoxClass = isDark ? "rounded-xl border border-[#2b423a] bg-[#132d24] p-3 text-[#dfece2]" : "rounded-xl border border-[#e1e8df] bg-[#f7f9f6] p-3 text-[#2f4d3b]";
+
+  if (loading) {
+    return <div><PageHeader title="Settings" description="Manage your seller profile, store details, and preferences." /><p role="status" className="rounded-2xl border border-[#e9ede7] bg-white p-6 text-sm text-[#778178]">Loading your store settings…</p></div>;
+  }
 
   return (
     <div>
@@ -60,39 +105,42 @@ export default function Settings() {
           <form id="store-profile" onSubmit={updateProfile} className={panelClass}>
             <div className="mb-6 flex items-center gap-3"><div className={`rounded-xl p-2.5 ${isDark ? "bg-[#183128] text-[#dff7e6]" : "bg-[#edf4ed] text-[#347048]"}`}><Store size={20} /></div><div><h2 className={sectionTitleClass}>Store profile</h2><p className={`mt-1 text-xs ${mutedTextClass}`}>Control how your business is presented.</p></div></div>
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-              <label className={labelClass}>Store name<input required maxLength={80} value={profile.storeName} onChange={(e) => { setProfile({ ...profile, storeName: e.target.value }); setSaved(false); }} className={fieldClass} /></label>
-              <label className={labelClass}>Store URL slug<div className={`mt-2 flex overflow-hidden rounded-xl border ${isDark ? "border-[#2b423a] focus-within:border-[#7fb895]" : "border-[#e1e8df] focus-within:border-[#659873]"}`}><span className={`flex items-center border-r px-3 text-xs ${isDark ? "border-[#2b423a] bg-[#162d24] text-[#a7b9ae]" : "border-[#e1e8df] bg-[#f7f9f6] text-[#8c988e]"}`}>/store/</span><input required pattern="[a-z0-9-]+" maxLength={60} value={profile.slug} onChange={(e) => { setProfile({ ...profile, slug: e.target.value }); setSaved(false); }} className={`min-w-0 flex-1 px-3 py-3 text-sm outline-none ${isDark ? "bg-[#0f1f1a] text-[#edf5ee]" : "bg-white text-[#354238]"}`} /></div></label>
-              <label className={`${labelClass} sm:col-span-2`}>Store description<textarea maxLength={300} rows={3} value={profile.description} onChange={(e) => { setProfile({ ...profile, description: e.target.value }); setSaved(false); }} className={fieldClass} /></label>
+              <label className={labelClass}>Store name<input required maxLength={80} value={profile?.businessName || ""} onChange={(e) => { setProfile({ ...profile, businessName: e.target.value }); setSaved(false); }} className={fieldClass} /></label>
+              <label className={labelClass}>Store URL slug<div className={`mt-2 flex overflow-hidden rounded-xl border ${isDark ? "border-[#2b423a] focus-within:border-[#7fb895]" : "border-[#e1e8df] focus-within:border-[#659873]"}`}><span className={`flex items-center border-r px-3 text-xs ${isDark ? "border-[#2b423a] bg-[#162d24] text-[#a7b9ae]" : "border-[#e1e8df] bg-[#f7f9f6] text-[#8c988e]"}`}>/store/</span><input required pattern="[a-z0-9-]+" maxLength={60} value={profile?.storeSlug || ""} onChange={(e) => { setProfile({ ...profile, storeSlug: e.target.value }); setSaved(false); }} className={`min-w-0 flex-1 px-3 py-3 text-sm outline-none ${isDark ? "bg-[#0f1f1a] text-[#edf5ee]" : "bg-white text-[#354238]"}`} /></div></label>
+              <label className={labelClass}>WhatsApp number<input type="tel" required pattern="\+[1-9][0-9]{7,14}" placeholder="+919876543210" value={profile?.whatsapp || ""} onChange={(e) => { setProfile({ ...profile, whatsapp: e.target.value }); setSaved(false); }} className={fieldClass} /><span className={`mt-1 block text-[10px] font-normal ${mutedTextClass}`}>Use international format with country code. This number is not shown as text on your public store.</span></label>
+              <label className={`${labelClass} sm:col-span-2`}>Store description<textarea maxLength={300} rows={3} value={profile?.description || ""} onChange={(e) => { setProfile({ ...profile, description: e.target.value }); setSaved(false); }} className={fieldClass} /></label>
             </div>
 
             <div className={`${previewBoxClass} mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between`}>
               <div>
                 <p className={`text-[10px] uppercase tracking-[0.16em] ${mutedTextClass}`}>Store preview</p>
-                <p className="mt-1 break-all text-sm font-semibold">{previewUrl || "https://your-store-url.com"}</p>
+                <p className="mt-1 break-all text-sm font-semibold">{previewUrl || "Save a store slug to create your link"}</p>
               </div>
               <a
-                href={previewUrl || "#"}
+                href={previewUrl || undefined}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center justify-center rounded-xl border border-[#1d4f34] bg-[#215c39] px-4 py-2.5 text-xs font-bold text-white shadow-[0_10px_18px_rgba(33,92,57,0.18)] transition hover:bg-[#18482b]"
+                aria-disabled={!previewUrl}
+                onClick={(event) => { if (!previewUrl) event.preventDefault(); }}
+                className={`inline-flex items-center justify-center rounded-xl border border-[#1d4f34] bg-[#215c39] px-4 py-2.5 text-xs font-bold text-white shadow-[0_10px_18px_rgba(33,92,57,0.18)] transition hover:bg-[#18482b] ${!previewUrl ? "cursor-not-allowed opacity-50" : ""}`}
               >
                 View storefront
               </a>
             </div>
 
             <div className="mt-5 flex flex-wrap items-center gap-3">
-              <button type="submit" className="rounded-xl bg-[#215c39] px-5 py-3 text-xs font-semibold text-white hover:bg-[#18482b]">Save store settings</button>
+              <button type="submit" disabled={!profile || saving} className="rounded-xl bg-[#215c39] px-5 py-3 text-xs font-semibold text-white hover:bg-[#18482b] disabled:cursor-wait disabled:opacity-60">{saving ? "Saving…" : "Save store settings"}</button>
             </div>
-            {saved && <p role="status" className={`mt-3 flex items-center gap-2 text-xs font-medium ${isDark ? "text-[#b9f0c8]" : "text-[#327348]"}`}><Check size={15} /> Changes saved in this session.</p>}
+            {error && <p role="alert" className="mt-3 text-xs font-medium text-red-600">{error}</p>}
+            {saved && <p role="status" className={`mt-3 flex items-center gap-2 text-xs font-medium ${isDark ? "text-[#b9f0c8]" : "text-[#327348]"}`}><Check size={15} /> Store settings saved. This link opens your store.</p>}
           </form>
 
           <section id="account" className={panelClass}>
             <div className="mb-6 flex items-center gap-3"><div className={`rounded-xl p-2.5 ${isDark ? "bg-[#183128] text-[#dff7e6]" : "bg-[#edf4ed] text-[#347048]"}`}><UserRound size={20} /></div><div><h2 className={sectionTitleClass}>Account details</h2><p className={`mt-1 text-xs ${mutedTextClass}`}>Your seller account information.</p></div></div>
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-              <label className={labelClass}>Full name<input value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} className={fieldClass} /></label>
-              <label className={labelClass}>Email address<input type="email" value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} className={fieldClass} /></label>
+              <label className={labelClass}>Seller email<input type="email" value={profile?.email || ""} readOnly className={fieldClass} /></label>
             </div>
-            <p className={`mt-4 text-[11px] leading-5 ${isDark ? "text-[#9dad9f]" : "text-[#929d93]"}`}>These fields are placeholders. Account updates and email verification must be handled securely by your backend.</p>
+            <p className={`mt-4 text-[11px] leading-5 ${isDark ? "text-[#9dad9f]" : "text-[#929d93]"}`}>This email comes from your saved seller profile. Account identity changes are managed through your sign-in account.</p>
           </section>
 
           <section id="notifications" className={panelClass}>

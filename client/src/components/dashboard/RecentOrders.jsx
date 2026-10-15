@@ -20,7 +20,7 @@ export default function RecentOrders() {
       try {
         const response = await fetchDashboardSummary();
         setOrders(Array.isArray(response?.analytics?.recentOrders) ? response.analytics.recentOrders : []);
-      } catch (error) {
+      } catch {
         setOrders([]);
       }
     };

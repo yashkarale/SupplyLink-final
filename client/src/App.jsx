@@ -1,20 +1,23 @@
 
 import "./App.css";
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import AppLayout from "./components/layout/AppLayout";
-import Dashboard from "./pages/Dashboard";
-import Orders from "./pages/Orders";
-import Products from "./pages/Products";
-import Inventory from "./pages/Inventory";
-import Customers from "./pages/Customers";
-import Analytics from "./pages/Analytics";
-import AIInsights from "./pages/AIInsights";
-import Billing from "./pages/Billing";
-import Settings from "./pages/Settings";
-import AuthPage from "./pages/AuthPage";
-import LandingPage from "./pages/LandingPage";
-import OnboardingPage from "./pages/OnboardingPage";
-import Storefront from "./pages/Storefront";
+
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Orders = lazy(() => import("./pages/Orders"));
+const Products = lazy(() => import("./pages/Products"));
+const Inventory = lazy(() => import("./pages/Inventory"));
+const Customers = lazy(() => import("./pages/Customers"));
+const Analytics = lazy(() => import("./pages/Analytics"));
+const AIInsights = lazy(() => import("./pages/AIInsights"));
+const Billing = lazy(() => import("./pages/Billing"));
+const Settings = lazy(() => import("./pages/Settings"));
+const AuthPage = lazy(() => import("./pages/AuthPage"));
+const LandingPage = lazy(() => import("./pages/LandingPage"));
+const OnboardingPage = lazy(() => import("./pages/OnboardingPage"));
+const Storefront = lazy(() => import("./pages/Storefront"));
+const TrackOrder = lazy(() => import("./pages/TrackOrder"));
 
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem("supplylink_token");
@@ -28,12 +31,14 @@ const ProtectedRoute = ({ children }) => {
 
 export default function App() {
   return (
+    <Suspense fallback={<main className="grid min-h-screen place-items-center bg-[#f6f3ee] text-[#385744]">Loading Supply Link…</main>}>
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<AuthPage mode="login" />} />
       <Route path="/register" element={<AuthPage mode="register" />} />
       <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
       <Route path="/store/:slug" element={<Storefront />} />
+      <Route path="/track/:token" element={<TrackOrder />} />
 
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
         <Route path="/dashboard" element={<Dashboard />} />
@@ -48,5 +53,6 @@ export default function App() {
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>
     </Routes>
+    </Suspense>
   );
 }

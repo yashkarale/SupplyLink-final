@@ -34,7 +34,7 @@ export default function Analytics() {
           customerCount: toNumber(analytics.customerCount),
           salesSeries: Array.isArray(analytics.salesSeries) ? analytics.salesSeries : [],
         });
-      } catch (error) {
+      } catch {
         setSummary({ totalSales: 0, totalOrders: 0, customerCount: 0, salesSeries: [] });
       } finally {
         setLoading(false);

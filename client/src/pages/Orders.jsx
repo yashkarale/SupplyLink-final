@@ -39,7 +39,7 @@ const normalizeOrder = (order) => ({
   id: order?._id || order?.id || `SL-${Date.now()}`,
   reference: order?.orderReference || order?.id || `SL-${Date.now()}`,
   customer: order?.customer?.name || "Guest customer",
-  email: order?.customer?.email || "customer@demo.com",
+  email: order?.customer?.email || "",
   date: order?.createdAt
     ? new Date(order.createdAt).toLocaleString("en-IN", {
         dateStyle: "medium",
@@ -56,6 +56,7 @@ const normalizeOrder = (order) => ({
 
 export default function Orders() {
   const [orders, setOrders] = useState([]);
+  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("All statuses");
 
@@ -65,7 +66,7 @@ export default function Orders() {
         const response = await fetchOrders();
         const list = Array.isArray(response) ? response : Array.isArray(response?.orders) ? response.orders : [];
         setOrders(list.map(normalizeOrder));
-      } catch (error) {
+      } catch {
         setOrders([]);
       }
     };
@@ -90,9 +91,11 @@ export default function Orders() {
 
     if (backendStatus && !String(id).startsWith("SL-")) {
       try {
-        await updateOrderStatus(id, backendStatus);
+        const response = await updateOrderStatus(id, backendStatus);
+        if (!response?.success) throw new Error(response?.message || "Unable to update order status.");
       } catch (error) {
-        // Keep the local UI responsive even when backend status updates fail.
+        setError(error?.response?.data?.message || error.message || "Unable to update order status.");
+        return;
       }
     }
 
@@ -106,6 +109,7 @@ export default function Orders() {
   return (
     <div>
       <PageHeader title="Orders" description="Track purchases and manage order fulfillment." />
+      {error && <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>}
       <div className="mb-6 grid grid-cols-2 gap-4 xl:grid-cols-4">
         {[
           ["All orders", orders.length],
@@ -130,7 +134,7 @@ export default function Orders() {
               <tbody className="divide-y divide-[#f0f2ee]">
                 {filtered.map((o) => (<tr key={o.id} className="hover:bg-[#fafbf9]">
                   <td className="px-5 py-4 text-xs font-semibold text-[#375240]">{o.reference}</td>
-                  <td className="px-5 py-4"><p className="text-xs font-semibold text-[#354238]">{o.customer}</p><p className="mt-1 text-[10px] text-[#9aa49b]">{o.email}</p></td>
+                  <td className="px-5 py-4"><p className="text-xs font-semibold text-[#354238]">{o.customer}</p><p className="mt-1 text-[10px] text-[#9aa49b]">{o.email || "No email provided"}</p></td>
                   <td className="px-5 py-4 text-xs text-[#758176]">{o.date}</td>
                   <td className="px-5 py-4 text-xs text-[#758176]">{o.items}</td>
                   <td className="px-5 py-4 text-xs text-[#758176]">{o.method}</td>

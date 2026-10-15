@@ -21,7 +21,7 @@ const formatCurrency = (value) =>
 
 const normalizeCustomer = (order, index) => {
   const name = order?.customer?.name || "Guest customer";
-  const email = order?.customer?.email || `customer${index}@demo.com`;
+  const email = order?.customer?.email || "";
 
   return {
     id: order?._id || order?.id || `CUS-${index + 1}`,
@@ -65,11 +65,12 @@ export default function Customers() {
 
         list.forEach((order, index) => {
           const normalized = normalizeCustomer(order, index);
-          const previous = customerMap.get(normalized.email) || customerMap.get(normalized.name);
+          const customerKey = normalized.email || normalized.name;
+          const previous = customerMap.get(customerKey);
 
           if (!previous) {
             const nextCustomer = { ...normalized, segment: getCustomerSegment(1, normalized.spent) };
-            customerMap.set(normalized.email, nextCustomer);
+            customerMap.set(customerKey, nextCustomer);
             return;
           }
 
@@ -81,11 +82,11 @@ export default function Customers() {
             segment: getCustomerSegment(previous.orders + 1, previous.spent + normalized.spent),
           };
 
-          customerMap.set(normalized.email, nextCustomer);
+          customerMap.set(customerKey, nextCustomer);
         });
 
         setCustomers(Array.from(customerMap.values()));
-      } catch (error) {
+      } catch {
         setCustomers([]);
       }
     };
@@ -151,7 +152,7 @@ export default function Customers() {
                         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e8f0e7] text-xs font-bold text-[#396447]">{c.initials}</div>
                         <div>
                           <p className="text-xs font-semibold text-[#354238]">{c.name}</p>
-                          <p className="mt-1 text-[10px] text-[#9aa49b]">{c.email}</p>
+                          <p className="mt-1 text-[10px] text-[#9aa49b]">{c.email || "No email provided"}</p>
                         </div>
                       </div>
                     </td>

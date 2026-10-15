@@ -1,24 +1,11 @@
 
-import { Bell, ChevronDown, Menu, MoonStar, Search, SunMedium } from "lucide-react";
+import { Bell, Menu, MoonStar, Search, SunMedium, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
-
-const liveFeedSeed = [
-  { id: 1, title: "Store published", message: "Your storefront is live and ready for shoppers.", tone: "success" },
-  { id: 2, title: "Stock monitor", message: "3 products need replenishment this week.", tone: "warning" },
-  { id: 3, title: "AI update", message: "Demand trend is up 18% for your top sellers.", tone: "info" },
-  { id: 4, title: "New order", message: "A customer placed an order in the last 2 minutes.", tone: "success" },
-];
-
-const liveUpdates = [
-  { title: "New order", message: "A customer just placed a premium order from your store.", tone: "success" },
-  { title: "Inventory alert", message: "Low stock on your top-selling tote collection.", tone: "warning" },
-  { title: "AI demand pulse", message: "Demand for cotton essentials is trending above plan.", tone: "info" },
-  { title: "Store activity", message: "Two new visitors checked out your storefront today.", tone: "success" },
-];
+import { Link } from "react-router-dom";
 
 export default function AppHeader({ onMenuClick, theme, onToggleTheme }) {
   const [search, setSearch] = useState("");
-  const [notifications, setNotifications] = useState(liveFeedSeed);
+  const [notifications, setNotifications] = useState([]);
   const [panelOpen, setPanelOpen] = useState(false);
 
   useEffect(() => {
@@ -30,15 +17,9 @@ export default function AppHeader({ onMenuClick, theme, onToggleTheme }) {
       setPanelOpen(true);
     };
 
-    const interval = setInterval(() => {
-      const item = liveUpdates[Math.floor(Math.random() * liveUpdates.length)];
-      setNotifications((previous) => [{ ...item, id: Date.now() + Math.random() }, ...previous].slice(0, 5));
-    }, 12000);
-
     window.addEventListener("supplylink:notify", handler);
     return () => {
       window.removeEventListener("supplylink:notify", handler);
-      clearInterval(interval);
     };
   }, []);
 
@@ -65,8 +46,8 @@ export default function AppHeader({ onMenuClick, theme, onToggleTheme }) {
         </button>
 
         <div className="hidden text-right sm:block">
-          <p className={`text-xs font-semibold ${theme === "dark" ? "text-[#eaf4eb]" : "text-[#26372b]"}`}>My Store</p>
-          <p className={`mt-0.5 text-[10px] ${theme === "dark" ? "text-[#9aa89f]" : "text-[#929d93]"}`}>Launch plan</p>
+          <p className={`text-xs font-semibold ${theme === "dark" ? "text-[#eaf4eb]" : "text-[#26372b]"}`}>Seller workspace</p>
+          <p className={`mt-0.5 text-[10px] ${theme === "dark" ? "text-[#9aa89f]" : "text-[#929d93]"}`}>Manage your store</p>
         </div>
 
         <div className="relative">
@@ -83,8 +64,8 @@ export default function AppHeader({ onMenuClick, theme, onToggleTheme }) {
             <div className={`notification-panel absolute right-0 top-[54px] w-[330px] rounded-2xl border p-3 shadow-[0_22px_60px_rgba(17,43,28,0.12)] backdrop-blur-xl ${theme === "dark" ? "border-[#2a3d2f] bg-[#12261a]/95 text-[#edf5ee]" : "border-[#e7eee6] bg-white/95 text-[#203a2c]"}`}>
               <div className="mb-2 flex items-center justify-between px-2 pb-2 pt-1">
                 <div className="flex items-center gap-2">
-                  <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#1f7b52] shadow-[0_0_0_4px_rgba(31,123,82,0.1)]" />
-                  <span className={`text-[10px] font-bold uppercase tracking-[0.15em] ${theme === "dark" ? "text-[#b6d2bc]" : "text-[#6f8674]"}`}>Live updates</span>
+                  <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#8a9b8d]" />
+                  <span className={`text-[10px] font-bold uppercase tracking-[0.15em] ${theme === "dark" ? "text-[#b6d2bc]" : "text-[#6f8674]"}`}>Recent alerts</span>
                 </div>
                 <button className={`text-[10px] font-semibold ${theme === "dark" ? "text-[#d4f6dd]" : "text-[#3f7253]"}`} onClick={() => setNotifications([])}>Clear</button>
               </div>
@@ -108,10 +89,9 @@ export default function AppHeader({ onMenuClick, theme, onToggleTheme }) {
           )}
         </div>
 
-        <button className={`flex items-center gap-2 rounded-xl p-1.5 ${theme === "dark" ? "hover:bg-[#12261a]" : "hover:bg-[#f7f9f6]"}`}>
-          <div className={`flex h-9 w-9 items-center justify-center rounded-xl text-xs font-bold ${theme === "dark" ? "bg-[#1f4232] text-[#dff5e5]" : "bg-[#e3eee3] text-[#285b37]"}`}>YK</div>
-          <ChevronDown size={15} className={`hidden sm:block ${theme === "dark" ? "text-[#b0c8b8]" : "text-[#829084]"}`} />
-        </button>
+        <Link to="/settings" aria-label="Account and store settings" className={`flex h-10 w-10 items-center justify-center rounded-xl ${theme === "dark" ? "bg-[#1f4232] text-[#dff5e5] hover:bg-[#28533f]" : "bg-[#e3eee3] text-[#285b37] hover:bg-[#d7e8d8]"}`}>
+          <UserRound size={18} />
+        </Link>
       </div>
     </header>
   );

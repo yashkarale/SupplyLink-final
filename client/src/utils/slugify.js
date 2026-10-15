@@ -13,5 +13,5 @@ export function slugify(value) {
 
 export function getStoreUrl(slug) {
   if (!slug) return "";
-  return `${window.location.origin}/store/${slug}`;
+  return `${window.location.origin}/store/${slugify(slug)}`;
 }

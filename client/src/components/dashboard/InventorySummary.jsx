@@ -16,7 +16,7 @@ export default function InventorySummary() {
           lowStockCount: Number(analytics.lowStockCount || 0),
           outOfStockCount: Number(analytics.outOfStockCount || 0),
         });
-      } catch (error) {
+      } catch {
         setSummary({ lowStockCount: 0, outOfStockCount: 0 });
       }
     };

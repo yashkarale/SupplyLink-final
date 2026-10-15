@@ -9,16 +9,26 @@ const startApp = () => new Promise((resolve) => {
 });
 
 describe('auth routes', () => {
-  it('GET /api/auth/login returns a clear auth error instead of 404', async () => {
+  it('GET /api/auth/login is unavailable so credentials cannot be sent in a URL', async () => {
     const { server, port } = await startApp();
 
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/auth/login`);
 
-      expect(response.status).not.toBe(404);
-      expect(response.status).toBe(400);
-      const body = await response.json();
-      expect(body.message).toMatch(/Email and password/i);
+      expect(response.status).toBe(404);
+    } finally {
+      await new Promise((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it('does not accept credentials from query parameters', async () => {
+    const { server, port } = await startApp();
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/auth/login?email=buyer%40example.com&password=secret123`);
+      expect(response.status).toBe(404);
     } finally {
       await new Promise((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));

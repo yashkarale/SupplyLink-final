@@ -4,7 +4,7 @@ import { Search, Package, Boxes, IndianRupee, X, Minus, Plus } from "lucide-reac
 import PageHeader from "../components/ui/PageHeader";
 import StatusBadge from "../components/ui/StatusBadge";
 import EmptyState from "../components/ui/EmptyState";
-import { createProduct, fetchProducts, updateInventory } from "../services/api";
+import { createProduct, fetchProducts, updateInventory, updateProduct } from "../services/api";
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat("en-IN", {
@@ -39,6 +39,8 @@ export default function Products() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ name: "", category: "Apparel", price: "", stock: "" });
   const [error, setError] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [productCapacity, setProductCapacity] = useState(null);
 
   useEffect(() => {
     const loadProducts = async () => {
@@ -46,8 +48,13 @@ export default function Products() {
         const response = await fetchProducts();
         const list = Array.isArray(response?.products) ? response.products : [];
         setProducts(list.map(normalizeProduct));
+        setProductCapacity({
+          limit: response?.productLimit ?? null,
+          count: Number(response?.activeProductCount || 0),
+        });
       } catch (requestError) {
         setProducts([]);
+        setError(requestError?.response?.data?.message || requestError?.message || "Unable to load products.");
       } finally {
         setLoading(false);
       }
@@ -73,27 +80,29 @@ export default function Products() {
 
     try {
       setError("");
-      const result = await createProduct({
+      const productPayload = {
         name: form.name.trim(),
         category: form.category,
         price,
         stock,
         lowStockThreshold: 5,
-        description: "",
-        sku: `SKU-${Date.now()}`,
-      });
+        ...(editingId ? {} : { description: "", sku: `SKU-${Date.now()}` }),
+      };
+      const result = editingId
+        ? await updateProduct(editingId, productPayload)
+        : await createProduct(productPayload);
 
-      const nextProduct = normalizeProduct(result?.product || {
-        _id: `PRD-${Date.now()}`,
-        name: form.name.trim(),
-        category: form.category,
-        price,
-        stock,
-        status: "Active",
-      });
+      if (!result?.product) throw new Error("The server did not return the saved product.");
+      const nextProduct = normalizeProduct(result.product);
 
-      setProducts((prev) => [nextProduct, ...prev]);
+      setProducts((prev) => editingId
+        ? prev.map((product) => product.id === editingId ? nextProduct : product)
+        : [nextProduct, ...prev]);
+      if (!editingId && productCapacity && productCapacity.limit !== null) {
+        setProductCapacity((current) => ({ ...current, count: current.count + 1 }));
+      }
       setForm({ name: "", category: "Apparel", price: "", stock: "" });
+      setEditingId(null);
       setShowForm(false);
     } catch (requestError) {
       const message = requestError?.response?.data?.message || "Unable to create product.";
@@ -127,6 +136,12 @@ export default function Products() {
   return (
     <div>
       <PageHeader title="Products" description="Manage your catalog, prices, and product availability." action="Add product" onAction={() => setShowForm(true)} />
+      {productCapacity && productCapacity.limit !== null && (
+        <div className="mb-4 rounded-xl border border-[#dfe8df] bg-[#f5f8f3] px-4 py-3 text-sm text-[#446553]">
+          Free plan: {productCapacity.count} of {productCapacity.limit} non-archived products. Archive a product or upgrade to add more.
+        </div>
+      )}
+      {error && !showForm && <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>}
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         {[
           { label: "Total products", value: products.length, icon: Package },
@@ -143,7 +158,7 @@ export default function Products() {
       {showForm && (
         <div className="mb-6 rounded-2xl border border-[#dce8dc] bg-white p-5 sm:p-6">
           <div className="mb-5 flex items-center justify-between">
-            <h2 className="font-bold text-[#26372b]">Create a product</h2>
+            <h2 className="font-bold text-[#26372b]">{editingId ? "Edit product" : "Create a product"}</h2>
             <button onClick={() => setShowForm(false)} className="rounded-lg p-2 text-[#849087] hover:bg-gray-100"><X size={18} /></button>
           </div>
           <form onSubmit={addProduct} className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -155,7 +170,7 @@ export default function Products() {
             <input required type="number" min="0" step="1" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} placeholder="Initial stock" className="rounded-xl border border-[#e1e8df] px-3 py-3 text-sm outline-none focus:border-[#659873]" />
             <div className="sm:col-span-2 lg:col-span-4">
               {error && <p className="mb-3 text-sm text-[#9a2f35]">{error}</p>}
-              <button type="submit" className="rounded-xl bg-[#215c39] px-5 py-3 text-sm font-semibold text-white hover:bg-[#18482b]">Save product</button>
+              <button type="submit" className="rounded-xl bg-[#215c39] px-5 py-3 text-sm font-semibold text-white hover:bg-[#18482b]">{editingId ? "Save changes" : "Save product"}</button>
             </div>
           </form>
         </div>
@@ -175,7 +190,7 @@ export default function Products() {
           {filtered.length === 0 ? <EmptyState title="No products found" /> : (
             <div className="custom-scrollbar overflow-x-auto">
               <table className="w-full min-w-[720px] text-left">
-                <thead className="bg-[#fafbf9] text-[10px] uppercase tracking-wider text-[#98a198]"><tr>{["Product", "Category", "Price", "Stock", "Units sold", "Status"].map((h) => <th key={h} className="px-5 py-3.5 font-semibold">{h}</th>)}</tr></thead>
+                <thead className="bg-[#fafbf9] text-[10px] uppercase tracking-wider text-[#98a198]"><tr>{["Product", "Category", "Price", "Stock", "Units sold", "Status", ""].map((h) => <th key={h} className="px-5 py-3.5 font-semibold">{h}</th>)}</tr></thead>
                 <tbody className="divide-y divide-[#f0f2ee]">
                   {filtered.map((p) => (
                     <tr key={p.id} className="hover:bg-[#fafbf9]">
@@ -205,6 +220,7 @@ export default function Products() {
                       </td>
                       <td className="px-5 py-4 text-xs text-[#758176]">{p.sold}</td>
                       <td className="px-5 py-4"><StatusBadge status={p.stock === 0 ? "Out of stock" : p.status} /></td>
+                      <td className="px-5 py-4"><button type="button" onClick={() => { setEditingId(p.id); setForm({ name: p.name, category: p.category, price: String(p.price), stock: String(p.stock) }); setShowForm(true); setError(""); }} className="text-xs font-semibold text-[#215c39] hover:underline">Edit</button></td>
                     </tr>
                   ))}
                 </tbody>

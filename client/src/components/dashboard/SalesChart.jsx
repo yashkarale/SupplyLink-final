@@ -18,7 +18,7 @@ export default function SalesChart() {
         const analytics = response?.analytics || {};
         setSeries(Array.isArray(analytics.salesSeries) ? analytics.salesSeries : []);
         setTotalRevenue(Number(analytics.totalSales || 0));
-      } catch (error) {
+      } catch {
         setSeries([]);
         setTotalRevenue(0);
       }

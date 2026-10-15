@@ -1,6 +1,7 @@
 import axios from "axios";
+import { slugify } from "../utils/slugify";
 
-const baseURL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const baseURL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "/api" : "http://localhost:5000/api");
 
 export const api = axios.create({
   baseURL,
@@ -47,6 +48,11 @@ export const getSellerProfile = async () => {
   return response.data;
 };
 
+export const updateSellerStoreSettings = async (payload) => {
+  const response = await api.put("/sellers/store-settings", payload);
+  return response.data;
+};
+
 export const fetchDashboardSummary = async () => {
   const response = await api.get("/sellers/dashboard");
   return response.data;
@@ -67,6 +73,11 @@ export const createProduct = async (payload) => {
   return response.data;
 };
 
+export const updateProduct = async (productId, payload) => {
+  const response = await api.put(`/products/${productId}`, payload);
+  return response.data;
+};
+
 export const updateInventory = async (productId, payload) => {
   const response = await api.patch(`/products/${productId}/stock`, payload);
   return response.data;
@@ -77,13 +88,19 @@ export const fetchOrders = async () => {
   return response.data;
 };
 
+export const fetchPublicOrderStatus = async (token) => {
+  const response = await api.get(`/orders/track/${encodeURIComponent(token)}`);
+  return response.data;
+};
+
 export const updateOrderStatus = async (orderId, orderStatus) => {
   const response = await api.patch(`/orders/${orderId}/status`, { orderStatus });
   return response.data;
 };
 
 export const createPublicOrder = async ({ slug, items, customer, paymentMethod = "COD" }) => {
-  const response = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:5000/api"}/store/${encodeURIComponent(slug)}/orders`, {
+  const canonicalSlug = slugify(slug);
+  const response = await fetch(`${baseURL}/store/${encodeURIComponent(canonicalSlug)}/orders`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -104,8 +121,58 @@ export const createPublicOrder = async ({ slug, items, customer, paymentMethod =
   return payload;
 };
 
+export const fetchPublicStore = async (slug) => {
+  const canonicalSlug = slugify(slug || "mystore");
+  const response = await fetch(`${baseURL}/store/${encodeURIComponent(canonicalSlug)}`);
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload?.message || "Store unavailable");
+  }
+
+  return payload;
+};
+
+export const subscribeToPublicStore = (slug) => {
+  const canonicalSlug = slugify(slug || "mystore");
+  return new EventSource(`${baseURL}/store/${encodeURIComponent(canonicalSlug)}/events`);
+};
+
+export const buildStoreContactUrl = (contactPath, items = [], product = "") => {
+  if (!contactPath) return "";
+  const apiRoot = new URL(baseURL, window.location.origin);
+  const target = new URL(contactPath, apiRoot);
+  if (product) target.searchParams.set("product", product);
+  else if (items.length) {
+    target.searchParams.set("items", JSON.stringify(items.map((item) => ({ productId: item.productId || item.id, quantity: item.quantity }))));
+  }
+  return target.toString();
+};
+
+export const getBillingStatus = async () => {
+  const response = await api.get("/billing/status");
+  return response.data;
+};
+
+export const createSubscriptionOrder = async (payload) => {
+  const response = await api.post("/billing/create-order", payload);
+  return response.data;
+};
+
+export const verifySubscriptionPayment = async (payload) => {
+  const response = await api.post("/billing/verify", payload);
+  return response.data;
+};
+
 export const fetchAiInsights = async () => {
-  const mlBaseUrl = import.meta.env.VITE_ML_URL || "http://localhost:8000";
+  const mlBaseUrl = import.meta.env.VITE_ML_URL;
+  if (!mlBaseUrl) {
+    return {
+      summary: { forecast: "Unavailable", inventoryHealth: "Unavailable", customerPulse: "Unavailable" },
+      modules: [],
+      connected: false,
+    };
+  }
 
   try {
     const response = await fetch(`${mlBaseUrl}/insights`);
@@ -114,18 +181,14 @@ export const fetchAiInsights = async () => {
     }
 
     return await response.json();
-  } catch (error) {
+  } catch {
     return {
       summary: {
-        forecast: "Demand trending up 18%",
-        inventoryHealth: "93% healthy",
-        customerPulse: "Repeat buyers strong",
+        forecast: "Unavailable",
+        inventoryHealth: "Unavailable",
+        customerPulse: "Unavailable",
       },
-      modules: [
-        { title: "Demand forecasting", score: 92, insight: "Best-selling items are likely to rise in the next 7 days.", trend: "+18%" },
-        { title: "Inventory optimization", score: 88, insight: "Reorder 3 SKUs before Friday to avoid stockouts.", trend: "+12%" },
-        { title: "Customer segmentation", score: 90, insight: "Returning buyers are contributing 62% of spend.", trend: "+9%" },
-      ],
+      modules: [],
       connected: false,
     };
   }

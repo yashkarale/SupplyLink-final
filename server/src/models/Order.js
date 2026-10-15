@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 const orderSchema = new mongoose.Schema({
   sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller', required: true, index: true },
   orderReference: { type: String, required: true, unique: true },
+  trackingTokenHash: { type: String, select: false, unique: true, sparse: true },
+  trackingTokenExpiresAt: { type: Date, default: null },
   customer: {
     name: { type: String, required: true, trim: true },
     phone: { type: String, required: true, trim: true },
@@ -35,6 +37,12 @@ const orderSchema = new mongoose.Schema({
     from: { type: String, required: true },
     to: { type: String, required: true },
     changedAt: { type: Date, default: Date.now },
+  }],
+  emailDelivery: [{
+    recipient: { type: String, enum: ['seller', 'buyer'], required: true },
+    status: { type: String, enum: ['not_configured', 'accepted', 'sent', 'delivered', 'delayed', 'bounced', 'complained', 'failed', 'skipped'], required: true },
+    providerMessageId: { type: String, default: '' },
+    updatedAt: { type: Date, default: Date.now },
   }],
 }, { timestamps: true });
 
