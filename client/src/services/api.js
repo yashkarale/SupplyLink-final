@@ -24,6 +24,19 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.data?.code === "EMAIL_VERIFICATION_REQUIRED") {
+      localStorage.removeItem("supplylink_token");
+      if (!["/login", "/register", "/verify-email"].includes(window.location.pathname)) {
+        window.location.assign("/login");
+      }
+    }
+    return Promise.reject(error);
+  },
+);
+
 export const setAuthToken = (token) => {
   if (token) {
     localStorage.setItem("supplylink_token", token);
@@ -40,6 +53,16 @@ export const loginUser = async (payload) => {
 
 export const registerUser = async (payload) => {
   const response = await api.post("/auth/register", payload);
+  return response.data;
+};
+
+export const verifyEmail = async (token) => {
+  const response = await api.post("/auth/verify-email", { token });
+  return response.data;
+};
+
+export const resendVerificationEmail = async (email) => {
+  const response = await api.post("/auth/resend-verification", { email });
   return response.data;
 };
 

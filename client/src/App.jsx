@@ -14,6 +14,7 @@ const AIInsights = lazy(() => import("./pages/AIInsights"));
 const Billing = lazy(() => import("./pages/Billing"));
 const Settings = lazy(() => import("./pages/Settings"));
 const AuthPage = lazy(() => import("./pages/AuthPage"));
+const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
 const LandingPage = lazy(() => import("./pages/LandingPage"));
 const OnboardingPage = lazy(() => import("./pages/OnboardingPage"));
 const Storefront = lazy(() => import("./pages/Storefront"));
@@ -36,6 +37,7 @@ export default function App() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<AuthPage mode="login" />} />
       <Route path="/register" element={<AuthPage mode="register" />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
       <Route path="/store/:slug" element={<Storefront />} />
       <Route path="/track/:token" element={<TrackOrder />} />

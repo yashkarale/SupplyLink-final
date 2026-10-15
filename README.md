@@ -59,13 +59,15 @@ EMAIL_FROM=Supply Link <orders@example.com>
 APP_BASE_URL=http://localhost:5173
 ```
 
+New seller signups require email ownership verification through Resend. Configure `RESEND_API_KEY`, a verified `EMAIL_FROM`, and `APP_BASE_URL` as the deployed frontend HTTPS origin on the server. New accounts cannot sign in before verifying the email link (valid for 24 hours); the login page can resend a link. Existing accounts are kept usable for this rollout. Keep the email provider key in the server's secret store.
+
 Paid subscriptions require Razorpay test or live credentials. Paid plans stay unavailable until both keys are configured; payment verification checks the signature and the Razorpay order's seller, plan, amount, and currency. Keep the key secret in the server's deployment secret store. Serve the frontend and API over HTTPS in production, and set `CLIENT_URL` to the allowed frontend origin(s).
 
 The public store API omits seller phone and WhatsApp values. Contact clicks resolve the seller on the server and redirect to WhatsApp. WhatsApp requires the recipient identifier in its destination URL, so a determined visitor can still see it there. Fully concealing it requires a WhatsApp Business Platform backend integration and its credentials.
 
 WhatsApp numbers must use international format (for India, `+91` plus a valid 10-digit mobile number). A valid number format does not prove the number has an active WhatsApp account. Storefront WhatsApp messages are inquiries only; checkout is the separate persisted order workflow.
 
-Order email is optional and uses the Resend API when both `RESEND_API_KEY` and `EMAIL_FROM` are configured. Configure a verified sender domain and production `APP_BASE_URL`. Without these values, email status is explicitly `not_configured`; when the API accepts an email request, this still does not prove inbox delivery. The signed webhook endpoint can record provider delivery events after `RESEND_WEBHOOK_SECRET` is configured, but it has not been verified against a live Resend account and there is no durable retry queue.
+Order notification email is optional and uses the Resend API. Account verification is required for registration and login and uses the same provider configuration. Configure a verified sender domain and production `APP_BASE_URL`. Without these values, new registrations fail closed rather than allowing unverified addresses. When Resend accepts an email request, this still does not prove inbox delivery. The signed webhook endpoint can record provider delivery events after `RESEND_WEBHOOK_SECRET` is configured, but it has not been tested with a live provider account and there is no durable retry queue.
 
 For deployment, set `VITE_API_URL` to the HTTPS API base in the client build environment (or use the same-origin `/api` default), and set `VITE_ML_URL` only when an HTTPS ML service is deployed. The backend refuses to start without `MONGODB_URI` and a 32-character `JWT_SECRET`; in production it also requires HTTPS `CLIENT_URL` origins. MongoDB transactions used for product limits, order stock, and subscription persistence require a replica set; the local Docker configuration starts a single-node replica set. Back up and review existing data before running `npm run migrate` to create/verify indexes.
 

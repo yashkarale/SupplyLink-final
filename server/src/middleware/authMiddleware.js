@@ -15,6 +15,13 @@ export const protect = (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+    if (decoded.emailVerified !== true) {
+      return res.status(403).json({
+        code: "EMAIL_VERIFICATION_REQUIRED",
+        message: "Verify your email before accessing your seller account.",
+      });
+    }
+
     req.user = {
       userId: decoded.userId,
       role: decoded.role

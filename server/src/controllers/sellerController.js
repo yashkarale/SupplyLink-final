@@ -109,8 +109,15 @@ export const onboardSeller = async (req, res) => {
     }
 
     const existingSeller = await Seller.findOne({ userId: user._id });
-    const existingPlan = existingSeller?.plan === "starter" ? "launch" : existingSeller?.plan === "pro" ? "scale" : existingSeller?.plan;
-    const plan = ["free", "launch", "scale"].includes(existingPlan) ? existingPlan : "free";
+    if (existingSeller) {
+      return res.status(200).json({
+        success: true,
+        alreadyExists: true,
+        message: "This account already has a store. Open your dashboard to manage it.",
+        seller: serializeSeller(existingSeller),
+      });
+    }
+
     const duplicateSlug = await Seller.findOne({
       storeSlug,
       userId: { $ne: user._id },
@@ -133,21 +140,17 @@ export const onboardSeller = async (req, res) => {
       whatsapp,
       category: category || "General",
       faqs,
-      plan,
-      subscriptionStatus: ["inactive", "active", "payment_pending"].includes(existingSeller?.subscriptionStatus)
-        ? existingSeller.subscriptionStatus
-        : "inactive",
+      plan: "free",
+      subscriptionStatus: "inactive",
       status: "active",
       isPublished: true,
     };
 
-    const seller = existingSeller
-      ? await Seller.findByIdAndUpdate(existingSeller._id, payload, { new: true })
-      : await Seller.create(payload);
+    const seller = await Seller.create(payload);
 
-    return res.status(existingSeller ? 200 : 201).json({
+    return res.status(201).json({
       success: true,
-      message: existingSeller ? "Seller profile updated" : "Seller onboarding complete",
+      message: "Seller onboarding complete",
       seller: serializeSeller(seller),
     });
   } catch (error) {

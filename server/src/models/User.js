@@ -16,6 +16,22 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true
     },
+    emailVerified: {
+      type: Boolean,
+      // Legacy accounts remain usable; new registrations explicitly set false.
+      default: true,
+    },
+    emailVerificationTokenHash: {
+      type: String,
+      default: null,
+      select: false,
+      index: true,
+    },
+    emailVerificationExpiresAt: {
+      type: Date,
+      default: null,
+      select: false,
+    },
     password: {
       type: String,
       required: true,

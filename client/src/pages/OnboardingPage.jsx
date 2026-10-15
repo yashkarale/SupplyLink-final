@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Building2, CheckCircle2, ExternalLink, Sparkles } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
-import { onboardSeller } from "../services/api";
+import { getSellerProfile, onboardSeller } from "../services/api";
 import { getStoreUrl, slugify } from "../utils/slugify";
 import { notifyUser } from "../utils/notifications";
 
@@ -21,6 +21,34 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [copyStatus, setCopyStatus] = useState("idle");
+  const [profileCheck, setProfileCheck] = useState("checking");
+
+  useEffect(() => {
+    let active = true;
+    getSellerProfile()
+      .then(({ seller }) => {
+        if (!active) return;
+        if (seller) {
+          navigate("/dashboard", { replace: true });
+          return;
+        }
+        setProfileCheck("ready");
+      })
+      .catch(() => {
+        if (active) setProfileCheck("error");
+      });
+    return () => { active = false; };
+  }, [navigate]);
+
+  const retryProfileCheck = () => {
+    setProfileCheck("checking");
+    getSellerProfile()
+      .then(({ seller }) => {
+        if (seller) navigate("/dashboard", { replace: true });
+        else setProfileCheck("ready");
+      })
+      .catch(() => setProfileCheck("error"));
+  };
 
   const storeSlug = useMemo(() => {
     const generated = slugify(form.businessName || form.storeSlug || "mystore");
@@ -93,7 +121,11 @@ export default function OnboardingPage() {
         faqs: form.faqs.trim(),
       };
 
-      await onboardSeller(payload);
+      const result = await onboardSeller(payload);
+      if (result?.alreadyExists) {
+        navigate("/dashboard", { replace: true });
+        return;
+      }
       notifyUser({ title: "Store published", message: `Your storefront is live at ${getStoreUrl(finalSlug)}` });
       setSubmitted(true);
       setTimeout(() => navigate("/dashboard"), 1100);
@@ -108,6 +140,22 @@ export default function OnboardingPage() {
       setLoading(false);
     }
   };
+
+  if (profileCheck === "checking") {
+    return <main className="grid min-h-screen place-items-center bg-[#f6f3ee] p-6 text-sm text-[#385744]">Checking your existing store…</main>;
+  }
+
+  if (profileCheck === "error") {
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#f6f3ee] p-6">
+        <section className="max-w-md rounded-2xl border border-[#e3e9e1] bg-white p-6 text-center">
+          <h1 className="text-xl font-bold text-[#183721]">Could not check your store</h1>
+          <p className="mt-2 text-sm text-[#667266]">Reconnect to the server before creating a store. This prevents changing a store that may already belong to your account.</p>
+          <button type="button" onClick={retryProfileCheck} className="mt-5 rounded-xl bg-[#215c39] px-5 py-3 text-sm font-bold text-white">Try again</button>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <div className="onboarding-shell">

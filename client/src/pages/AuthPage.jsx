@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { loginUser, registerUser, setAuthToken } from "../services/api";
+import { getSellerProfile, loginUser, registerUser, resendVerificationEmail, setAuthToken } from "../services/api";
 
 export default function AuthPage({ mode = "login" }) {
   const navigate = useNavigate();
@@ -13,6 +13,8 @@ export default function AuthPage({ mode = "login" }) {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [verificationNeeded, setVerificationNeeded] = useState(false);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -23,6 +25,8 @@ export default function AuthPage({ mode = "login" }) {
     event.preventDefault();
     setLoading(true);
     setError("");
+    setNotice("");
+    setVerificationNeeded(false);
 
     try {
       const payload = {
@@ -35,13 +39,34 @@ export default function AuthPage({ mode = "login" }) {
 
       if (result?.token) {
         setAuthToken(result.token);
-        navigate("/onboarding");
+        if (isRegister) {
+          navigate("/onboarding");
+          return;
+        }
+
+        let seller;
+        try {
+          ({ seller } = await getSellerProfile());
+        } catch (profileError) {
+          setAuthToken(null);
+          throw profileError;
+        }
+        navigate(seller ? "/dashboard" : "/onboarding", { replace: true });
         return;
       }
 
-      navigate("/dashboard");
+      if (result?.verificationRequired) {
+        setNotice(result.message || "Check your email for a verification link before signing in.");
+        return;
+      }
+
+      throw new Error("The server did not complete authentication. Please try again.");
     } catch (requestError) {
       const message = requestError?.response?.data?.message || requestError?.message;
+
+      if (requestError?.response?.status === 403 && /verify your email/i.test(message || "")) {
+        setVerificationNeeded(true);
+      }
 
       if (!requestError?.response || requestError?.code === "ERR_NETWORK") {
         setError("We couldn't reach the server. Please start the backend and try again.");
@@ -49,6 +74,21 @@ export default function AuthPage({ mode = "login" }) {
       }
 
       setError(message || "Authentication failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    setLoading(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await resendVerificationEmail(form.email);
+      setNotice(result?.message || "If this account needs verification, a new link will be sent to its email address.");
+      setVerificationNeeded(false);
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || "Unable to resend the verification email right now.");
     } finally {
       setLoading(false);
     }
@@ -132,9 +172,20 @@ export default function AuthPage({ mode = "login" }) {
               />
             </div>
 
+            {notice && (
+              <div role="status" style={{ color: "#285b39", background: "#eef8ef", border: "1px solid #cde5d0", borderRadius: 10, padding: 10, fontSize: 14 }}>
+                {notice}
+              </div>
+            )}
+
             {error && (
               <div style={{ color: "#9a2f35", background: "#fff0f1", border: "1px solid #f7ced2", borderRadius: 10, padding: 10, fontSize: 14 }}>
                 {error}
+                {verificationNeeded && !isRegister && (
+                  <button type="button" disabled={loading || !form.email} onClick={handleResendVerification} className="mt-2 block font-bold underline disabled:opacity-60">
+                    Resend verification email
+                  </button>
+                )}
               </div>
             )}
 
