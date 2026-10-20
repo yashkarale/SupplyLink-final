@@ -6,6 +6,11 @@ ml-service/.venv/
 
 # Build outputs
 client/dist/
+server/dist/
+server/build/
+
+# Environment files
+client/.env
 server/.env
 ml-service/.env
 

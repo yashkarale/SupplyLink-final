@@ -1,13 +1,24 @@
-
-import { NavLink } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { NavLink, Link } from "react-router-dom";
 import {
-  Activity, BarChart3, Bot, Boxes, CreditCard, LayoutDashboard,
-  Package, Settings, ShoppingBag, Users, X, Leaf, ExternalLink
+  Activity,
+  ArrowRight,
+  BarChart3,
+  Bot,
+  Boxes,
+  CreditCard,
+  LayoutDashboard,
+  Package,
+  Settings,
+  ShoppingBag,
+  Users,
+  X,
+  Layers,
 } from "lucide-react";
 
 const groups = [
   {
-    label: "WORKSPACE",
+    label: "Manage",
     links: [
       { label: "Overview", path: "/dashboard", icon: LayoutDashboard },
       { label: "Orders", path: "/orders", icon: ShoppingBag },
@@ -17,70 +28,137 @@ const groups = [
     ],
   },
   {
-    label: "GROW YOUR BUSINESS",
+    label: "Grow",
     links: [
       { label: "Analytics", path: "/analytics", icon: BarChart3 },
-      { label: "AI Insights", path: "/ai-insights", icon: Bot },
+      { label: "AI Insights", path: "/ai-insights", icon: Bot, badge: "AI" },
       { label: "Billing & Plan", path: "/billing", icon: CreditCard },
     ],
   },
 ];
 
-export default function AppSidebar({ open, onClose, theme }) {
+export default function AppSidebar({ open = false, onClose = () => {} }) {
+  const sidebarRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    const previousFocus = document.activeElement;
+    document.body.style.overflow = "hidden";
+    sidebarRef.current?.querySelector("a, button")?.focus();
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !sidebarRef.current) return;
+      const focusable = [...sidebarRef.current.querySelectorAll('a[href], button:not([disabled])')];
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+      previousFocus?.focus?.();
+    };
+  }, [open, onClose]);
+
+  const navLinkClass = ({ isActive }) =>
+    `group relative flex min-h-11 items-center gap-3 rounded-[5px] border px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
+      isActive
+        ? "border-line bg-paper font-semibold text-ink"
+        : "border-transparent text-muted hover:border-line hover:bg-paper hover:text-ink"
+    }`;
+
   return (
     <>
-      {open && <button aria-label="Close menu overlay" onClick={onClose} className="fixed inset-0 z-40 bg-black/30 lg:hidden" />}
-      <aside className={`fixed inset-y-0 left-0 z-50 flex w-[252px] flex-col border-r transition-transform duration-300 lg:translate-x-0 ${open ? "translate-x-0" : "-translate-x-full"} ${theme === "dark" ? "border-[#21382d] bg-[linear-gradient(180deg,#12251b,#0d1d15)] text-[#edf5ee]" : "border-[#e9ede7] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(244,249,245,0.96))] text-[#1d2b23]"}`}>
-        <div className={`flex h-[76px] items-center justify-between border-b px-6 ${theme === "dark" ? "border-[#21382d]" : "border-[#eef0ec]"}`}>
-          <NavLink to="/" onClick={onClose} className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-[13px] bg-[linear-gradient(135deg,#173d2c,#2f7d52)] text-white shadow-[0_12px_24px_rgba(23,61,44,0.25)]">
-              <Leaf size={22} />
-            </div>
-            <div>
-              <p className={`text-[17px] font-bold tracking-tight ${theme === "dark" ? "text-[#ebf7ee]" : "text-[#1e3324]"}`}>supply<span className="text-[#45875a]">link</span></p>
-              <p className={`text-[10px] font-medium tracking-[0.16em] ${theme === "dark" ? "text-[#94a095]" : "text-[#94a095]"}`}>SELLER STUDIO</p>
-            </div>
-          </NavLink>
-          <button onClick={onClose} className={`rounded-lg p-2 lg:hidden ${theme === "dark" ? "text-white/80 hover:bg-white/5" : "text-gray-500 hover:bg-gray-100"}`}><X size={19} /></button>
+      <button
+        type="button"
+        aria-label="Close navigation menu"
+        aria-hidden={!open}
+        tabIndex={open ? 0 : -1}
+        onClick={onClose}
+        className={`fixed inset-0 z-40 bg-ink/45 transition-opacity duration-200 lg:hidden ${open ? "visible opacity-100" : "invisible pointer-events-none opacity-0"}`}
+      />
+      <aside
+        id="supplylink-sidebar"
+        aria-label="Main navigation"
+        ref={sidebarRef}
+        role={open ? "dialog" : undefined}
+        aria-modal={open ? "true" : undefined}
+        className={`fixed inset-y-0 left-0 z-50 flex w-[min(280px,calc(100vw-40px))] flex-col border-r border-line bg-surface text-ink shadow-[var(--shadow-subtle)] transition-transform duration-200 motion-reduce:transition-none lg:w-[252px] lg:translate-x-0 lg:shadow-none ${open ? "translate-x-0" : "-translate-x-full"}`}
+      >
+        <div className="flex h-[72px] shrink-0 items-center justify-between border-b border-line px-5">
+          <Link to="/dashboard" onClick={onClose} className="group flex min-w-0 items-center gap-3 rounded-[5px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[5px] bg-ink text-accent">
+              <Layers size={19} strokeWidth={2} aria-hidden="true" />
+            </span>
+            <span className="min-w-0">
+              <span className="block font-serif text-lg font-semibold leading-tight tracking-tight">Supply Link</span>
+              <span className="mt-0.5 block text-[9px] font-semibold uppercase tracking-[0.16em] text-muted">Seller workspace</span>
+            </span>
+          </Link>
+          <button type="button" aria-label="Close navigation" onClick={onClose} className="grid h-10 w-10 shrink-0 place-items-center rounded-[5px] text-muted hover:bg-paper hover:text-ink focus-visible:outline-2 focus-visible:outline-accent lg:hidden">
+            <X size={18} />
+          </button>
         </div>
 
-        <div className="custom-scrollbar flex-1 overflow-y-auto px-4 py-6">
+        <div className="flex-1 overflow-y-auto overscroll-contain px-3 py-5">
           {groups.map((group) => (
-            <div key={group.label} className="mb-7">
-              <p className={`mb-3 px-3 text-[10px] font-bold tracking-[0.15em] ${theme === "dark" ? "text-[#9ba49c]" : "text-[#9ba49c]"}`}>{group.label}</p>
-              <nav className="space-y-1">
-                {group.links.map(({ label, path, icon: Icon }) => (
-                  <NavLink
-                    key={path}
-                    to={path}
-                    end={path === "/dashboard"}
-                    onClick={onClose}
-                    className={({ isActive }) => `flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition ${isActive ? (theme === "dark" ? "bg-[#183128] text-[#dff7e6] shadow-[inset_0_0_0_1px_rgba(117,171,130,0.2)]" : "bg-[linear-gradient(135deg,#eaf3ec,#edf7f0)] text-[#215c39] shadow-[inset_0_0_0_1px_rgba(33,92,57,0.09)]") : theme === "dark" ? "text-[#afc7b0] hover:bg-white/5 hover:text-[#edf7ee]" : "text-[#778178] hover:bg-[#f6f8f5] hover:text-[#26372b]"}`}
-                  >
-                    <Icon size={18} strokeWidth={1.8} />
-                    <span>{label}</span>
-                    {label === "AI Insights" && <span className={`ml-auto rounded-md px-1.5 py-0.5 text-[9px] font-bold ${theme === "dark" ? "bg-[#1b4537] text-[#dff7e6]" : "bg-[#d9efde] text-[#27633b]"}`}>AI</span>}
+            <section key={group.label} className="mb-7">
+              <h2 className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">{group.label}</h2>
+              <nav aria-label={group.label} className="space-y-1">
+                {group.links.map(({ label, path, icon: Icon, badge }) => (
+                  <NavLink key={path} to={path} end={path === "/dashboard"} onClick={onClose} className={navLinkClass}>
+                    {({ isActive }) => (
+                      <>
+                        <Icon size={17} strokeWidth={isActive ? 2 : 1.7} aria-hidden="true" />
+                        <span className="min-w-0 flex-1 truncate">{label}</span>
+                        {badge && <span className="border border-line px-1.5 py-0.5 text-[9px] font-semibold text-muted">{badge}</span>}
+                        {isActive && <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-label="Current page" />}
+                      </>
+                    )}
                   </NavLink>
                 ))}
               </nav>
-            </div>
+            </section>
           ))}
-          <p className={`mb-3 px-3 text-[10px] font-bold tracking-[0.15em] ${theme === "dark" ? "text-[#9ba49c]" : "text-[#9ba49c]"}`}>PREFERENCES</p>
-          <NavLink to="/settings" onClick={onClose} className={({ isActive }) => `flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium ${isActive ? (theme === "dark" ? "bg-[#183128] text-[#dff7e6] shadow-[inset_0_0_0_1px_rgba(117,171,130,0.2)]" : "bg-[linear-gradient(135deg,#eaf3ec,#edf7f0)] text-[#215c39] shadow-[inset_0_0_0_1px_rgba(33,92,57,0.09)]") : theme === "dark" ? "text-[#afc7b0] hover:bg-white/5" : "text-[#778178] hover:bg-[#f6f8f5]"}`}>
-            <Settings size={18} strokeWidth={1.8} /> Settings
-          </NavLink>
+          <section>
+            <h2 className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">Workspace</h2>
+            <nav aria-label="Workspace preferences">
+              <NavLink to="/settings" onClick={onClose} className={navLinkClass}>
+                <Settings size={17} strokeWidth={1.7} aria-hidden="true" />
+                <span className="flex-1">Settings</span>
+              </NavLink>
+            </nav>
+          </section>
         </div>
 
-        <div className={`border-t p-4 ${theme === "dark" ? "border-[#21382d]" : "border-[#eef0ec]"}`}>
-          <div className={`rounded-2xl p-4 shadow-[0_12px_28px_rgba(17,43,28,0.04)] ${theme === "dark" ? "bg-[linear-gradient(135deg,#183128,#10261d)]" : "bg-[linear-gradient(135deg,#f4f8f3,#edf6ef)]"}`}>
-            <div className="mb-2 flex items-center gap-2">
-              <Activity size={16} className="text-[#438457]" />
-              <span className={`text-xs font-semibold ${theme === "dark" ? "text-[#ebf7ee]" : "text-[#284c31]"}`}>Your store is growing</span>
+        <div className="shrink-0 border-t border-line p-3">
+          <div className="border border-line bg-paper p-3">
+            <div className="flex items-center gap-2.5">
+              <span className="grid h-8 w-8 place-items-center border border-line bg-surface text-muted"><Activity size={15} aria-hidden="true" /></span>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-ink">Store toolkit</p>
+                <p className="text-[10px] text-muted">Keep your catalog current</p>
+              </div>
             </div>
-            <p className={`mb-3 text-[11px] leading-5 ${theme === "dark" ? "text-[#c8d9cd]" : "text-[#78857a]"}`}>Keep your catalog updated to give customers a better shopping experience.</p>
-            <NavLink to="/products" onClick={onClose} className={`flex items-center gap-1 text-xs font-semibold ${theme === "dark" ? "text-[#d0f6db]" : "text-[#27633b]"}`}>Manage products <ExternalLink size={12} /></NavLink>
+            <Link to="/products" onClick={onClose} className="mt-3 flex min-h-10 items-center justify-between gap-2 bg-ink px-3 text-xs font-semibold text-paper transition-colors hover:bg-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+              <span className="flex items-center gap-2"><Package size={14} aria-hidden="true" /> Manage products</span>
+              <ArrowRight size={14} aria-hidden="true" />
+            </Link>
           </div>
-          <p className={`mt-4 text-center text-[10px] ${theme === "dark" ? "text-[#a7b7ab]" : "text-[#a3aba4]"}`}>Supply Link · Seller Studio</p>
+          <p className="pt-3 text-center text-[10px] tracking-wide text-muted">Supply Link <span className="mx-1">·</span> Commerce</p>
         </div>
       </aside>
     </>

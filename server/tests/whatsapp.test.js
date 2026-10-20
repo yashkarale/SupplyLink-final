@@ -28,7 +28,22 @@ describe("seller WhatsApp destinations", () => {
     }));
     const message = url.searchParams.get("text");
     expect(message).toContain("Tea & Honey × 2 — ₹241.00");
-    expect(message).toContain("no Supply Link order has been placed");
+    expect(message).toContain("no Supply Link order is placed");
     expect(message).toContain("Hi Green & Good");
+  });
+
+  it("adds the order reference and private screenshot link after a QR order", () => {
+    const url = new URL(buildWhatsAppUrl({
+      businessName: "Green & Good",
+      whatsapp: "+919876543210",
+      orderReference: "SL-12345",
+      paymentProofUrl: "https://api.example.com/api/store/green/payment-proof?token=secret",
+      items: [{ name: "Tea", price: 120, quantity: 1 }],
+    }));
+    const message = url.searchParams.get("text");
+    expect(message).toContain("I have submitted payment");
+    expect(message).toContain("Please verify it in your payment app");
+    expect(message).toContain("SL-12345");
+    expect(message).toContain("https://api.example.com/api/store/green/payment-proof?token=secret");
   });
 });

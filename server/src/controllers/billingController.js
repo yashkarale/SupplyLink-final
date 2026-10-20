@@ -2,8 +2,11 @@ import crypto from "node:crypto";
 import Razorpay from "razorpay";
 import Seller from "../models/Seller.js";
 import SubscriptionPayment from "../models/SubscriptionPayment.js";
+import SubscriptionCheckout from "../models/SubscriptionCheckout.js";
+import RazorpayWebhookEvent from "../models/RazorpayWebhookEvent.js";
 import { getPlanConfig } from "../config/subscriptionPlans.js";
 import { isDatabaseWriteLimitReached } from "../utils/storageUsage.js";
+import { createNotification } from "./notificationController.js";
 
 export const addOneMonth = (fromDate = new Date()) => {
   const date = new Date(fromDate);
@@ -15,11 +18,14 @@ export const addOneMonth = (fromDate = new Date()) => {
   return date;
 };
 
+export const isRazorpayConfigurationAllowed = ({ keyId, nodeEnv = process.env.NODE_ENV } = {}) =>
+  Boolean(keyId) && (nodeEnv !== "staging" || keyId.startsWith("rzp_test_"));
+
 const createRazorpayClient = () => {
   const keyId = process.env.RAZORPAY_KEY_ID;
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
-  if (!keyId || !keySecret) {
+  if (!isRazorpayConfigurationAllowed({ keyId }) || !keySecret) {
     return null;
   }
 
@@ -43,6 +49,108 @@ export const isCapturedSubscriptionPayment = ({ payment, order, plan, userId }) 
     String(order.notes?.userId || "") === String(userId) &&
     String(order.notes?.plan || "") === plan.name
   );
+
+export const verifyRazorpayWebhookSignature = ({ rawBody, signature, secret }) => {
+  if (!Buffer.isBuffer(rawBody) || !rawBody.length || !signature || !secret || !/^[a-f0-9]{64}$/i.test(signature)) return false;
+  const expected = crypto.createHmac("sha256", secret).update(rawBody).digest();
+  const received = Buffer.from(signature, "hex");
+  return expected.length === received.length && crypto.timingSafeEqual(expected, received);
+};
+
+const validRazorpayId = (value) => typeof value === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(value);
+
+const applyCapturedPayment = async ({ orderId, payment, order, session }) => {
+  const checkout = await SubscriptionCheckout.findOne({ razorpayOrderId: orderId }).session(session);
+  if (!checkout) throw new Error("No server-created checkout matches this payment.");
+  const existingPayment = await SubscriptionPayment.findOne({ razorpayPaymentId: payment.id }).session(session);
+  if (existingPayment) {
+    if (String(existingPayment.sellerId) !== String(checkout.sellerId) || existingPayment.razorpayOrderId !== orderId) {
+      throw new Error("Payment is already associated with a different checkout.");
+    }
+    await SubscriptionCheckout.updateOne({ _id: checkout._id }, { $set: { status: "paid", razorpayPaymentId: payment.id } }, { session });
+    return existingPayment;
+  }
+  const plan = getPlanConfig(checkout.plan);
+  if (!isCapturedSubscriptionPayment({ payment, order, plan, userId: checkout.sellerId })) {
+    throw new Error("Captured payment does not match the server-created checkout.");
+  }
+
+  const seller = await Seller.findOne({ userId: checkout.sellerId }).session(session);
+  if (!seller) throw new Error("Seller account was not found for this checkout.");
+  const paidAt = new Date(payment.created_at ? payment.created_at * 1000 : Date.now());
+  const currentExpiry = seller.planExpiresAt ? new Date(seller.planExpiresAt) : null;
+  const entitlementStartedAt = currentExpiry && currentExpiry > paidAt ? currentExpiry : paidAt;
+  const entitlementExpiresAt = addOneMonth(entitlementStartedAt);
+
+  const [savedPayment] = await SubscriptionPayment.create([{
+    sellerId: checkout.sellerId,
+    razorpayOrderId: orderId,
+    razorpayPaymentId: payment.id,
+    plan: plan.name,
+    amount: plan.amount,
+    currency: plan.currency,
+    paidAt,
+    entitlementStartedAt,
+    entitlementExpiresAt,
+  }], { session });
+  await SubscriptionCheckout.updateOne({ _id: checkout._id }, {
+    $set: { status: "paid", razorpayPaymentId: payment.id },
+  }, { session });
+  await Seller.updateOne({ _id: seller._id }, {
+    $set: {
+      plan: plan.name,
+      subscriptionStatus: "active",
+      lastOrderId: orderId,
+      lastPaymentId: payment.id,
+      planUpdatedAt: paidAt,
+      planExpiresAt: entitlementExpiresAt,
+    },
+  }, { session });
+  createNotification({
+    sellerId: checkout.sellerId,
+    type: "subscription_activated",
+    title: "Subscription activated",
+    message: `Your ${plan.displayName || plan.name} plan is now active until ${new Date(entitlementExpiresAt).toLocaleDateString("en-IN")}.`,
+    data: { plan: plan.name, amount: plan.amount, expiresAt: entitlementExpiresAt },
+    link: `/billing`,
+  }).catch((error) => console.error("Failed to create subscription notification:", error.message));
+  return savedPayment;
+};
+
+const applyRefund = async ({ payment, providerPayment, session }) => {
+  const record = await SubscriptionPayment.findOne({ razorpayPaymentId: payment.id }).session(session);
+  if (!record) throw new Error("Refund does not match a recorded Supply Link subscription payment.");
+  const amountRefunded = Math.max(0, Number(providerPayment.amount_refunded || 0));
+  await SubscriptionPayment.updateOne({ _id: record._id }, {
+    $set: {
+      refundedAmount: amountRefunded,
+      ...(amountRefunded >= record.amount ? { refundedAt: new Date() } : {}),
+    },
+  }, { session });
+  if (amountRefunded < record.amount) return;
+
+  const seller = await Seller.findOne({ userId: record.sellerId }).session(session);
+  if (!seller || seller.lastPaymentId !== record.razorpayPaymentId) return;
+  const now = new Date();
+  const replacement = await SubscriptionPayment.findOne({
+    sellerId: record.sellerId,
+    razorpayPaymentId: { $ne: record.razorpayPaymentId },
+    refundedAt: null,
+    entitlementExpiresAt: { $gt: now },
+  }).sort({ entitlementExpiresAt: -1 }).session(session);
+  await Seller.updateOne({ _id: seller._id }, replacement ? {
+    $set: {
+      plan: replacement.plan,
+      subscriptionStatus: "active",
+      lastOrderId: replacement.razorpayOrderId,
+      lastPaymentId: replacement.razorpayPaymentId,
+      planExpiresAt: replacement.entitlementExpiresAt,
+      planUpdatedAt: now,
+    },
+  } : {
+    $set: { plan: "free", subscriptionStatus: "inactive", planExpiresAt: null, planUpdatedAt: now, lastOrderId: "", lastPaymentId: "" },
+  }, { session });
+};
 
 const buildBillingResponseForSeller = (seller) => {
   const legacyNames = { starter: "launch", pro: "scale" };
@@ -159,6 +267,15 @@ export const createSubscriptionOrder = async (req, res) => {
       },
     });
 
+    await SubscriptionCheckout.create({
+      sellerId: req.user.userId,
+      razorpayOrderId: order.id,
+      plan: plan.name,
+      amount: plan.amount,
+      currency: plan.currency,
+      status: "pending",
+    });
+
     return res.status(200).json({
       success: true,
       keyId: process.env.RAZORPAY_KEY_ID,
@@ -185,8 +302,7 @@ export const createSubscriptionOrder = async (req, res) => {
 
 export const verifySubscription = async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, plan } = req.body || {};
-    const targetPlan = getPlanConfig(String(plan || "free").trim().toLowerCase());
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
 
     if (!process.env.RAZORPAY_KEY_SECRET || !razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
       return res.status(503).json({
@@ -195,7 +311,7 @@ export const verifySubscription = async (req, res) => {
       });
     }
 
-    if (!/^[a-zA-Z0-9_-]{1,100}$/.test(String(razorpay_order_id)) || !/^[a-zA-Z0-9_-]{1,100}$/.test(String(razorpay_payment_id)) || !/^[a-fA-F0-9]{64}$/.test(String(razorpay_signature))) {
+    if (!validRazorpayId(razorpay_order_id) || !validRazorpayId(razorpay_payment_id) || !/^[a-fA-F0-9]{64}$/.test(String(razorpay_signature))) {
       return res.status(400).json({ success: false, message: "Invalid Razorpay payment details." });
     }
 
@@ -213,6 +329,13 @@ export const verifySubscription = async (req, res) => {
       });
     }
 
+    const checkout = await SubscriptionCheckout.findOne({
+      razorpayOrderId: razorpay_order_id,
+      sellerId: req.user.userId,
+    }).lean();
+    if (!checkout) return res.status(404).json({ success: false, message: "Subscription checkout was not found." });
+    const targetPlan = getPlanConfig(checkout.plan);
+
     const razorpayClient = createRazorpayClient();
     if (!razorpayClient) {
       return res.status(503).json({ success: false, message: "Razorpay is not configured." });
@@ -221,34 +344,14 @@ export const verifySubscription = async (req, res) => {
       razorpayClient.orders.fetch(razorpay_order_id),
       razorpayClient.payments.fetch(razorpay_payment_id),
     ]);
-    if (!isCapturedSubscriptionPayment({ payment, order, plan: targetPlan, userId: req.user.userId })) {
+    if (payment.id !== razorpay_payment_id || order.id !== razorpay_order_id || !isCapturedSubscriptionPayment({ payment, order, plan: targetPlan, userId: req.user.userId })) {
       return res.status(400).json({ success: false, message: "Payment order does not match this seller and plan." });
     }
 
     const session = await Seller.startSession();
     try {
       await session.withTransaction(async () => {
-        await SubscriptionPayment.create([{
-          sellerId: req.user.userId,
-          razorpayOrderId: razorpay_order_id,
-          razorpayPaymentId: razorpay_payment_id,
-          plan: targetPlan.name,
-          amount: targetPlan.amount,
-          currency: targetPlan.currency,
-          paidAt: new Date(payment.created_at ? payment.created_at * 1000 : Date.now()),
-        }], { session });
-        await Seller.findOneAndUpdate(
-          { userId: req.user.userId },
-          {
-            plan: targetPlan.name,
-            subscriptionStatus: "active",
-            lastOrderId: razorpay_order_id,
-            lastPaymentId: razorpay_payment_id,
-            planUpdatedAt: new Date(),
-            planExpiresAt: addOneMonth(),
-          },
-          { upsert: true, new: true, session }
-        );
+        await applyCapturedPayment({ orderId: razorpay_order_id, payment, order, session });
       });
     } finally {
       await session.endSession();
@@ -272,5 +375,94 @@ export const verifySubscription = async (req, res) => {
       success: false,
       message: error.message || "Unable to verify payment",
     });
+  }
+};
+
+export const handleRazorpayWebhook = async (req, res) => {
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  const rawBody = req.rawBody;
+  const signature = req.get("x-razorpay-signature");
+  if (!webhookSecret || !verifyRazorpayWebhookSignature({ rawBody, signature, secret: webhookSecret })) {
+    return res.status(400).json({ success: false, message: "Invalid Razorpay webhook signature." });
+  }
+
+  let payload;
+  try { payload = JSON.parse(rawBody.toString("utf8")); } catch {
+    return res.status(400).json({ success: false, message: "Invalid webhook payload." });
+  }
+  if (!payload?.event || typeof payload.event !== "string") {
+    return res.status(400).json({ success: false, message: "Webhook event is missing." });
+  }
+  const suppliedEventId = req.get("x-razorpay-event-id");
+  const eventId = suppliedEventId && /^[a-zA-Z0-9_-]{1,200}$/.test(suppliedEventId)
+    ? suppliedEventId
+    : crypto.createHash("sha256").update(rawBody).digest("hex");
+  const payment = payload.payload?.payment?.entity;
+  const refund = payload.payload?.refund?.entity;
+  const paymentId = payment?.id || refund?.payment_id;
+
+  try {
+    const client = createRazorpayClient();
+    let fetchedPayment;
+    let fetchedOrder;
+    if (payload.event === "payment.captured") {
+      if (!validRazorpayId(payment?.id) || !validRazorpayId(payment?.order_id)) throw new Error("Captured payment identifiers are invalid.");
+      if (!client) return res.status(503).json({ success: false, message: "Razorpay is not configured." });
+      [fetchedPayment, fetchedOrder] = await Promise.all([
+        client.payments.fetch(payment.id),
+        client.orders.fetch(payment.order_id),
+      ]);
+    } else if (payload.event === "refund.processed") {
+      if (!validRazorpayId(paymentId)) throw new Error("Refund payment identifier is invalid.");
+      if (!client) return res.status(503).json({ success: false, message: "Razorpay is not configured." });
+      fetchedPayment = await client.payments.fetch(paymentId);
+      if (!fetchedPayment || fetchedPayment.id !== paymentId) throw new Error("Refund payment could not be verified.");
+    }
+
+    const session = await Seller.startSession();
+    try {
+      await session.withTransaction(async () => {
+        await RazorpayWebhookEvent.create([{
+          eventId,
+          event: payload.event,
+          resourceId: paymentId || payment?.order_id || "",
+          processedAt: new Date(),
+        }], { session });
+
+        if (payload.event === "payment.captured") {
+          await applyCapturedPayment({ orderId: payment.order_id, payment: fetchedPayment, order: fetchedOrder, session });
+        } else if (payload.event === "payment.failed" && validRazorpayId(payment?.order_id)) {
+          const failedCheckout = await SubscriptionCheckout.findOne({ razorpayOrderId: payment.order_id }).session(session);
+          if (failedCheckout) {
+            createNotification({
+              sellerId: failedCheckout.sellerId,
+              type: "payment_failed",
+              title: "Subscription payment failed",
+              message: `Your Razorpay payment for the ${failedCheckout.plan} plan failed. Your plan may expire if payment is not completed.`,
+              data: { orderId: payment.order_id, plan: failedCheckout.plan },
+              link: `/billing`,
+            }).catch((error) => console.error("Failed to create payment failure notification:", error.message));
+          }
+          await SubscriptionCheckout.updateOne(
+            { razorpayOrderId: payment.order_id, status: "pending" },
+            { $set: { status: "failed", razorpayPaymentId: payment.id || "" } },
+            { session },
+          );
+        } else if (payload.event === "refund.processed") {
+          await applyRefund({ payment: { id: paymentId }, providerPayment: fetchedPayment, session });
+        }
+      });
+    } finally {
+      await session.endSession();
+    }
+    return res.status(200).json({ success: true, received: true });
+  } catch (error) {
+    if (error.code === 11000) {
+      if (await RazorpayWebhookEvent.exists({ eventId })) return res.status(200).json({ success: true, received: true, duplicate: true });
+      console.error("Razorpay webhook collided with an existing payment/order record:", eventId);
+      return res.status(500).json({ success: false, message: "Webhook conflicted with an existing payment record." });
+    }
+    console.error("Razorpay webhook processing failed:", error.message);
+    return res.status(500).json({ success: false, message: "Webhook processing failed; provider may retry." });
   }
 };

@@ -8,7 +8,8 @@
     "start": "node src/server.js",
     "migrate": "node scripts/migrate.js",
     "storage:report": "node scripts/storage-report.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:staging": "vitest run tests/staging.integration.test.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

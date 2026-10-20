@@ -1,78 +1,32 @@
-
 import {
-  ArrowDownRight,
-  ArrowUpRight,
-  CalendarDays,
-  Download,
-  Ellipsis,
+  ArrowRight,
+  AlertTriangle,
+  Boxes,
+  ChartNoAxesCombined,
   Package,
+  RefreshCw,
   ShoppingBag,
   TrendingUp,
   Users,
-  ArrowUpRight as ExternalLink,
 } from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { fetchDashboardSummary } from "../services/api";
+import StatusBadge from "../components/ui/StatusBadge";
 
-function StatCard({ title, value, change, positive, icon: Icon }) {
-  return (
-    <div className="group rounded-[26px] border border-[#e9ece7] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(246,249,246,0.96))] p-5 shadow-[0_18px_35px_rgba(15,38,25,0.04)] transition duration-200 hover:-translate-y-1 hover:shadow-[0_24px_45px_rgba(15,38,25,0.08)]">
-      <div className="flex items-start justify-between">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#edf5ef,#e4efe8)] text-[#286746] shadow-inner">
-          <Icon size={20} strokeWidth={1.8} />
-        </div>
-        <button
-          type="button"
-          aria-label={`More options for ${title}`}
-          className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100"
-        >
-          <Ellipsis size={19} />
-        </button>
-      </div>
+const DashboardSalesChart = lazy(() => import("../components/dashboard/DashboardSalesChart"));
 
-      <p className="mt-5 text-[13px] font-medium text-[#778079]">{title}</p>
-      <div className="mt-2 flex flex-wrap items-end justify-between gap-2">
-        <h3 className="text-2xl font-bold tracking-tight text-[#1c2921]">{value}</h3>
-        <span
-          className={`mb-1 flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold ${
-            positive ? "bg-[#eaf7ee] text-[#247348]" : "bg-[#fff0ed] text-[#b64b3a]"
-          }`}
-        >
-          {positive ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
-          {change}
-        </span>
-      </div>
-      <p className="mt-2 text-[11px] text-[#9aa19b]">Live store data</p>
-    </div>
-  );
-}
-
-function StatusBadge({ status }) {
-  const styles = {
-    Confirmed: "bg-blue-50 text-blue-700",
-    Processing: "bg-amber-50 text-amber-700",
-    Delivered: "bg-emerald-50 text-emerald-700",
-    Pending: "bg-gray-100 text-gray-600",
-    PENDING: "bg-gray-100 text-gray-600",
-    SHIPPED: "bg-violet-50 text-violet-700",
-    CANCELLED: "bg-rose-50 text-rose-700",
-  };
-
-  return (
-    <span className={`inline-flex rounded-lg px-2.5 py-1.5 text-[10px] font-semibold ${styles[status] || "bg-gray-100 text-gray-600"}`}>
-      {status}
-    </span>
-  );
-}
+const EMPTY_SUMMARY = {
+  businessName: "",
+  totalSales: 0,
+  totalOrders: 0,
+  totalProducts: 0,
+  customerCount: 0,
+  lowStockCount: 0,
+  outOfStockCount: 0,
+  salesSeries: [],
+  recentOrders: [],
+};
 
 const formatMoney = (value) =>
   new Intl.NumberFormat("en-IN", {
@@ -81,27 +35,61 @@ const formatMoney = (value) =>
     maximumFractionDigits: 0,
   }).format(Number(value || 0));
 
-const toNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+const toNumber = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+
+const surface = "border border-line bg-surface";
+
+function MetricCard({ title, value, detail, icon: Icon, href, loading }) {
+  const content = (
+    <div className={`${surface} flex min-h-36 min-w-0 flex-col justify-between p-4 transition-colors hover:border-line-strong sm:p-5`}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-medium text-muted">{title}</span>
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[5px] border border-line bg-paper text-ink">
+          <Icon size={17} strokeWidth={1.8} aria-hidden="true" />
+        </span>
+      </div>
+      {loading ? (
+        <div className="mt-4 h-8 w-28 animate-pulse bg-paper" aria-hidden="true" />
+      ) : (
+        <>
+          <div className="mt-4 break-words text-2xl font-semibold tracking-tight text-ink sm:text-3xl">{value}</div>
+          <p className="mt-1 text-[11px] text-muted">{detail}</p>
+        </>
+      )}
+    </div>
+  );
+
+  return href ? (
+    <Link to={href} className="block rounded-[6px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+      {content}
+    </Link>
+  ) : content;
+}
+
+function LoadingPanel() {
+  return (
+    <div className={`${surface} grid min-h-52 place-items-center p-6`} role="status" aria-live="polite">
+      <span className="text-sm text-muted">Loading your store overview…</span>
+    </div>
+  );
+}
 
 export default function Dashboard() {
-  const [summary, setSummary] = useState({
-    totalSales: 0,
-    totalOrders: 0,
-    totalProducts: 0,
-    customerCount: 0,
-    lowStockCount: 0,
-    outOfStockCount: 0,
-    salesSeries: [],
-    recentOrders: [],
-  });
+  const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
-    const loadDashboard = async () => {
+    let active = true;
+    async function loadDashboard() {
       try {
         const response = await fetchDashboardSummary();
-        const analytics = response?.analytics || {};
+        const analytics = response?.analytics;
+        if (!analytics) throw new Error("Dashboard data is unavailable.");
+        if (!active) return;
         setSummary({
+          businessName: analytics.businessName || "",
           totalSales: toNumber(analytics.totalSales),
           totalOrders: toNumber(analytics.totalOrders),
           totalProducts: toNumber(analytics.totalProducts),
@@ -112,211 +100,189 @@ export default function Dashboard() {
           recentOrders: Array.isArray(analytics.recentOrders) ? analytics.recentOrders : [],
         });
       } catch {
-        setSummary({
-          totalSales: 0,
-          totalOrders: 0,
-          totalProducts: 0,
-          customerCount: 0,
-          lowStockCount: 0,
-          outOfStockCount: 0,
-          salesSeries: [],
-          recentOrders: [],
-        });
+        if (active) setLoadError("We couldn't load your store overview. Check your connection and try again.");
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
-    };
-
+    }
     loadDashboard();
-  }, []);
+    return () => { active = false; };
+  }, [refreshToken]);
 
   const chartData = useMemo(
-    () =>
-      summary.salesSeries.map((entry) => ({
-        day: entry.day,
-        sales: toNumber(entry.revenue),
-      })),
-    [summary.salesSeries],
+    () => summary.salesSeries.map((entry) => ({ day: entry.day, sales: toNumber(entry.revenue) })),
+    [summary.salesSeries]
   );
+  const hasSalesHistory = chartData.some((entry) => entry.sales > 0);
+  const sevenDaySales = chartData.reduce((total, entry) => total + entry.sales, 0);
+  const retryDashboard = () => {
+    setLoading(true);
+    setLoadError("");
+    setRefreshToken((current) => current + 1);
+  };
 
-  const revenueValue = formatMoney(summary.totalSales);
   return (
-    <main className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-9 lg:py-8">
-      <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div>
-          <p className="mb-2 text-xs font-medium text-[#8a948d]">Workspace / Overview</p>
-          <h1 className="text-2xl font-bold tracking-tight text-[#1b2920] sm:text-3xl">
-            Good evening<span className="text-[#378157]">.</span>
+    <div className="mx-auto w-full max-w-[1440px] min-w-0 space-y-7 sm:space-y-9">
+      <header className="flex min-w-0 flex-col justify-between gap-5 border-b border-line pb-6 sm:flex-row sm:items-end">
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">Seller workspace · Overview</p>
+          <h1 className="mt-2 break-words font-serif text-3xl font-medium tracking-tight text-ink sm:text-4xl">
+            {summary.businessName || "Store overview"}
           </h1>
-          <p className="mt-2 text-sm text-[#7a847d]">Here’s what’s happening with your store right now.</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">A clear view of your orders, catalog, and recent store activity.</p>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button type="button" className="flex items-center gap-2 rounded-xl border border-[#e3e8e1] bg-white px-3.5 py-2.5 text-xs font-medium text-[#4e5c52] transition hover:bg-gray-50">
-            <CalendarDays size={15} />
-            Last 7 days
-          </button>
-          <button type="button" onClick={() => window.print()} className="flex items-center gap-2 rounded-xl bg-[#173d2c] px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-[#24583e]">
-            <Download size={15} />
-            Export view
-          </button>
+        <div className="flex flex-wrap gap-2">
+          <Link to="/products" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[5px] border border-line-strong bg-surface px-3.5 text-xs font-semibold text-ink transition hover:bg-paper focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+            <Package size={15} /> Manage products
+          </Link>
+          <Link to="/orders" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[5px] bg-ink px-3.5 text-xs font-semibold text-paper transition hover:bg-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+            <ShoppingBag size={15} /> View orders <ArrowRight size={14} />
+          </Link>
         </div>
-      </div>
+      </header>
 
-      <div className="mb-8 rounded-[28px] bg-[linear-gradient(135deg,#173d2c_0%,#234d3a_28%,#316c4c_100%)] p-5 text-white shadow-[0_25px_60px_rgba(17,43,28,0.12)] sm:p-7">
-        <div className="flex flex-col justify-between gap-6 md:flex-row md:items-center">
-          <div className="max-w-xl">
-            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[10px] font-medium text-emerald-100">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-              YOUR BUSINESS AT A GLANCE
-            </div>
-            <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">Every order is an opportunity.</h2>
-            <p className="mt-2 max-w-lg text-sm leading-6 text-white/65">Bring your products, orders and customer relationships together in one place.</p>
-          </div>
-          <button type="button" onClick={() => window.open("/products", "_self")} className="flex w-fit items-center gap-2 rounded-xl bg-white px-4 py-3 text-xs font-semibold text-[#173d2c] transition hover:-translate-y-0.5 hover:bg-emerald-50">
-            Manage catalog
-            <ExternalLink size={14} />
-          </button>
-        </div>
-      </div>
-
-      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Total sales" value={revenueValue} change={summary.totalOrders ? "Live" : "No sales"} positive={summary.totalOrders > 0} icon={TrendingUp} />
-        <StatCard title="Total orders" value={String(summary.totalOrders)} change={summary.totalOrders ? "Live" : "No orders"} positive={summary.totalOrders > 0} icon={ShoppingBag} />
-        <StatCard title="Customers" value={String(summary.customerCount)} change={summary.customerCount ? "Live" : "None yet"} positive={summary.customerCount > 0} icon={Users} />
-        <StatCard title="Products listed" value={String(summary.totalProducts)} change={summary.lowStockCount ? `${summary.lowStockCount} low stock` : "Healthy"} positive={summary.lowStockCount === 0} icon={Package} />
-      </div>
-
-      <div className="mb-8 grid grid-cols-1 gap-5 xl:grid-cols-[1.65fr_1fr]">
-        <section className="min-w-0 rounded-[26px] border border-[#e9ece7] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(247,250,247,0.96))] p-5 shadow-[0_18px_35px_rgba(15,38,25,0.04)] sm:p-6">
-          <div className="mb-6 flex items-start justify-between gap-3">
+      {loadError ? (
+        <section className={`${surface} flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between`} role="alert">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 shrink-0 text-warning" size={18} />
             <div>
-              <h2 className="text-sm font-bold text-[#243329]">Sales overview</h2>
-              <p className="mt-1 text-xs text-[#8b958d]">Revenue performance over the last 7 days</p>
+              <h2 className="text-sm font-semibold text-ink">Overview unavailable</h2>
+              <p className="mt-1 text-sm text-muted">{loadError}</p>
             </div>
-            <button type="button" aria-label="Sales chart options" className="rounded-lg p-2 text-gray-400 hover:bg-gray-100">
-              <Ellipsis size={19} />
-            </button>
           </div>
-
-          <div className="mb-3">
-            <span className="text-3xl font-bold tracking-tight text-[#1b2920]">{revenueValue}</span>
-            <span className="ml-3 inline-flex items-center gap-1 text-xs font-semibold text-[#2c8553]">
-              <ArrowUpRight size={14} />
-              {summary.totalOrders ? "Updating" : "Waiting for orders"}
-            </span>
-          </div>
-
-          <div className="h-[260px] w-full">
-            {loading ? (
-              <div className="flex h-full items-center justify-center text-xs text-[#768178]">Loading sales data...</div>
-            ) : chartData.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-xs text-[#768178]">No completed orders yet. Your sales chart will appear here once you start receiving orders.</div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData} margin={{ top: 15, right: 8, left: -18, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#3a9462" stopOpacity={0.22} />
-                      <stop offset="100%" stopColor="#3a9462" stopOpacity={0.01} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid vertical={false} stroke="#edf0eb" strokeDasharray="4 4" />
-                  <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "#909991", fontSize: 11 }} dy={10} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fill: "#909991", fontSize: 10 }} tickFormatter={(value) => `₹${value / 1000}k`} />
-                  <Tooltip formatter={(value) => [`₹${Number(value).toLocaleString("en-IN")}`, "Sales"]} contentStyle={{ border: "1px solid #e7ebe5", borderRadius: 12, fontSize: 12 }} />
-                  <Area type="monotone" dataKey="sales" stroke="#328255" strokeWidth={2.5} fill="url(#salesFill)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
-          </div>
+          <button type="button" onClick={retryDashboard} className="inline-flex min-h-10 items-center justify-center gap-2 self-start rounded-[5px] border border-line-strong px-3 text-xs font-semibold text-ink hover:bg-paper focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:self-auto">
+            <RefreshCw size={14} /> Try again
+          </button>
         </section>
+      ) : (
+        <>
+          <section aria-label="Store metrics" className="grid min-w-0 grid-cols-1 gap-3 min-[360px]:grid-cols-2 xl:grid-cols-4">
+            <MetricCard title="Gross sales" value={formatMoney(summary.totalSales)} detail="Recognized order revenue · all time" icon={TrendingUp} loading={loading} />
+            <MetricCard title="Orders" value={summary.totalOrders.toLocaleString("en-IN")} detail="All storefront orders" icon={ShoppingBag} href="/orders" loading={loading} />
+            <MetricCard title="Customers" value={summary.customerCount.toLocaleString("en-IN")} detail="Customers with an order email" icon={Users} href="/customers" loading={loading} />
+            <MetricCard title="Products" value={summary.totalProducts.toLocaleString("en-IN")} detail={`${summary.lowStockCount} low · ${summary.outOfStockCount} out of stock`} icon={Package} href="/products" loading={loading} />
+          </section>
 
-        <section className="rounded-[26px] border border-[#e9ece7] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(247,250,247,0.96))] p-5 shadow-[0_18px_35px_rgba(15,38,25,0.04)] sm:p-6">
-          <div className="mb-5 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-[#243329]">Inventory health</h2>
-              <p className="mt-1 text-xs text-[#8b958d]">Real stock snapshot</p>
+          {loading ? <LoadingPanel /> : (
+            <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.8fr)]">
+              <section className={`${surface} min-w-0 p-4 sm:p-5`} aria-labelledby="sales-title">
+                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line pb-4">
+                  <div>
+                    <h2 id="sales-title" className="font-serif text-xl font-semibold text-ink">Sales, last seven days</h2>
+                    <p className="mt-1 text-xs text-muted">Daily recognized revenue from your orders</p>
+                  </div>
+                  <span className="text-sm font-semibold tabular-nums text-ink">{formatMoney(sevenDaySales)}</span>
+                </div>
+                {hasSalesHistory ? (
+                  <div className="mt-4 h-[260px] w-full min-w-0">
+                    <Suspense fallback={<div className="grid h-full place-items-center text-sm text-muted" role="status">Loading sales chart…</div>}>
+                      <DashboardSalesChart data={chartData} />
+                    </Suspense>
+                  </div>
+                ) : (
+                  <div className="grid min-h-56 place-items-center px-4 py-8 text-center">
+                    <div>
+                      <ChartNoAxesCombined size={25} className="mx-auto text-muted" aria-hidden="true" />
+                      <p className="mt-3 text-sm font-semibold text-ink">No sales in the last seven days</p>
+                      <p className="mt-1 max-w-sm text-xs leading-5 text-muted">When recognized orders are recorded, the daily revenue trend will appear here.</p>
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              <section className={`${surface} p-4 sm:p-5`} aria-labelledby="stock-title">
+                <div className="flex items-start justify-between gap-3 border-b border-line pb-4">
+                  <div>
+                    <h2 id="stock-title" className="font-serif text-xl font-semibold text-ink">Inventory check</h2>
+                    <p className="mt-1 text-xs text-muted">Items that may need attention</p>
+                  </div>
+                  <Boxes size={18} className="text-muted" aria-hidden="true" />
+                </div>
+                {summary.totalProducts === 0 ? (
+                  <div className="py-7">
+                    <p className="text-sm font-semibold text-ink">Your catalog is empty</p>
+                    <p className="mt-1 text-xs leading-5 text-muted">Add your first product to start tracking its stock here.</p>
+                    <Link to="/products" className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-ink underline underline-offset-4">Add a product <ArrowRight size={13} /></Link>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-line">
+                    <Link to="/inventory" className="flex min-h-14 items-center justify-between gap-3 py-3 text-sm hover:text-accent">
+                      <span className="text-muted">Low stock</span><span className="font-semibold tabular-nums text-ink">{summary.lowStockCount}</span>
+                    </Link>
+                    <Link to="/inventory" className="flex min-h-14 items-center justify-between gap-3 py-3 text-sm hover:text-accent">
+                      <span className="text-muted">Out of stock</span><span className="font-semibold tabular-nums text-ink">{summary.outOfStockCount}</span>
+                    </Link>
+                  </div>
+                )}
+                {summary.lowStockCount + summary.outOfStockCount > 0 && (
+                  <div className="mt-3 flex items-start gap-2 border-l-2 border-accent bg-paper p-3 text-xs leading-5 text-muted">
+                    <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warning" aria-hidden="true" />
+                    Review flagged stock before taking more orders.
+                  </div>
+                )}
+              </section>
             </div>
-            <Package size={18} className="text-[#6d8b76]" />
-          </div>
+          )}
 
-          <div className="space-y-5">
-            {[
-              { name: "In stock", count: Math.max(0, summary.totalProducts - summary.lowStockCount - summary.outOfStockCount), percent: summary.totalProducts ? Math.max(5, Math.round(((summary.totalProducts - summary.lowStockCount - summary.outOfStockCount) / summary.totalProducts) * 100)) : 0, color: "bg-[#4b9669]" },
-              { name: "Low stock", count: summary.lowStockCount, percent: summary.totalProducts ? Math.round((summary.lowStockCount / summary.totalProducts) * 100) : 0, color: "bg-[#e2ac4f]" },
-              { name: "Out of stock", count: summary.outOfStockCount, percent: summary.totalProducts ? Math.round((summary.outOfStockCount / summary.totalProducts) * 100) : 0, color: "bg-[#d87867]" },
-            ].map((item) => (
-              <div key={item.name}>
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-xs font-medium text-[#69756c]">{item.name}</span>
-                  <span className="text-xs font-bold text-[#29392e]">{item.count} products</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-[#f0f2ee]">
-                  <div className={`h-full rounded-full ${item.color}`} style={{ width: `${item.percent}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-7 rounded-xl border border-amber-100 bg-amber-50/70 p-4">
-            <div className="flex items-start gap-3">
-              <div className="rounded-lg bg-amber-100 p-2 text-amber-700">
-                <Package size={17} />
-              </div>
+          <section className={`${surface} min-w-0 overflow-hidden`} aria-labelledby="orders-title">
+            <div className="flex flex-col justify-between gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:px-5">
               <div>
-                <p className="text-xs font-semibold text-amber-900">Stock needs attention</p>
-                <p className="mt-1 text-xs leading-5 text-amber-800/80">{summary.lowStockCount || summary.outOfStockCount ? "Review the inventory list and restock the flagged SKUs." : "Your inventory is healthy right now."}</p>
+                <h2 id="orders-title" className="font-serif text-xl font-semibold text-ink">Recent orders</h2>
+                <p className="mt-1 text-xs text-muted">The five latest orders from your store</p>
               </div>
+              <Link to="/orders" className="inline-flex min-h-10 w-fit items-center gap-1.5 text-xs font-semibold text-ink underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+                All orders <ArrowRight size={14} />
+              </Link>
             </div>
-          </div>
-        </section>
-      </div>
-
-      <section className="overflow-hidden rounded-[28px] border border-[#e9ece7] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(247,250,247,0.96))] shadow-[0_18px_35px_rgba(15,38,25,0.04)]">
-        <div className="flex flex-col justify-between gap-3 p-5 sm:flex-row sm:items-center sm:px-6">
-          <div>
-            <h2 className="text-sm font-bold text-[#243329]">Recent orders</h2>
-            <p className="mt-1 text-xs text-[#8b958d]">Your latest customer activity</p>
-          </div>
-          <button type="button" onClick={() => window.location.assign("/orders")} className="flex w-fit items-center gap-2 text-xs font-semibold text-[#28764a] hover:text-[#174d30]">
-            View all orders
-            <ExternalLink size={13} />
-          </button>
-        </div>
-
-        {summary.recentOrders.length === 0 ? (
-          <div className="p-6 text-sm text-[#69756c]">No orders yet. Once a customer places an order, it will appear here automatically.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[650px] border-collapse text-left">
-              <thead>
-                <tr className="border-y border-[#edf0eb] bg-[#fafbf9]">
-                  {['ORDER', 'CUSTOMER', 'DATE', 'AMOUNT', 'STATUS'].map((label) => (
-                    <th key={label} className="px-6 py-3 text-[10px] font-bold tracking-wider text-[#89928b]">{label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {summary.recentOrders.map((order) => (
-                  <tr key={order.id} className="border-b border-[#f0f2ee] last:border-0 transition hover:bg-[#fbfcfa]">
-                    <td className="px-6 py-4 text-xs font-semibold text-[#2e5d41]">{order.id}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#edf3eb] text-[10px] font-bold text-[#386448]">{order.customer.slice(0, 2).toUpperCase()}</div>
-                        <span className="text-xs font-medium text-[#354239]">{order.customer}</span>
+            {loading ? (
+              <div className="p-5" role="status"> <div className="h-10 animate-pulse bg-paper" /> </div>
+            ) : summary.recentOrders.length === 0 ? (
+              <div className="flex flex-col items-start gap-3 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+                <div>
+                  <p className="text-sm font-semibold text-ink">No orders yet</p>
+                  <p className="mt-1 text-xs leading-5 text-muted">New customer orders will appear here.</p>
+                </div>
+                <Link to="/products" className="inline-flex min-h-10 items-center gap-2 rounded-[5px] border border-line-strong px-3 text-xs font-semibold text-ink hover:bg-paper">Review products <ArrowRight size={14} /></Link>
+              </div>
+            ) : (
+              <>
+                <div className="divide-y divide-line md:hidden">
+                  {summary.recentOrders.map((order) => (
+                    <Link key={order.id} to="/orders" className="block p-4 transition-colors hover:bg-paper focus-visible:outline-2 focus-visible:outline-accent">
+                      <div className="flex min-w-0 items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-ink">{order.customer}</p>
+                          <p className="mt-1 truncate text-[11px] text-muted">{order.id} · {order.date}</p>
+                        </div>
+                        <span className="shrink-0 text-sm font-semibold tabular-nums text-ink">{formatMoney(order.total)}</span>
                       </div>
-                    </td>
-                    <td className="px-6 py-4 text-xs text-[#78827a]">{order.date}</td>
-                    <td className="px-6 py-4 text-xs font-semibold text-[#29392e]">{formatMoney(order.total)}</td>
-                    <td className="px-6 py-4"><StatusBadge status={order.status} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-    </main>
+                      <div className="mt-3"><StatusBadge status={order.status} /></div>
+                    </Link>
+                  ))}
+                </div>
+                <div className="hidden overflow-x-auto md:block">
+                  <table className="w-full min-w-[640px] text-left">
+                    <thead className="bg-paper text-[10px] font-semibold uppercase tracking-wider text-muted">
+                      <tr>{["Order", "Customer", "Date", "Amount", "Status"].map((label) => <th key={label} className="px-4 py-3 font-semibold sm:px-5">{label}</th>)}</tr>
+                    </thead>
+                    <tbody className="divide-y divide-line">
+                      {summary.recentOrders.map((order) => (
+                        <tr key={order.id} className="transition-colors hover:bg-paper">
+                          <td className="px-4 py-4 text-xs font-semibold text-ink sm:px-5"><Link to="/orders" className="underline-offset-4 hover:underline">{order.id}</Link></td>
+                          <td className="max-w-52 truncate px-4 py-4 text-xs text-ink sm:px-5">{order.customer}</td>
+                          <td className="whitespace-nowrap px-4 py-4 text-xs text-muted sm:px-5">{order.date}</td>
+                          <td className="whitespace-nowrap px-4 py-4 text-xs font-semibold tabular-nums text-ink sm:px-5">{formatMoney(order.total)}</td>
+                          <td className="px-4 py-4 sm:px-5"><StatusBadge status={order.status} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </section>
+        </>
+      )}
+    </div>
   );
 }

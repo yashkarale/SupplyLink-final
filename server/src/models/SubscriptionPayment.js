@@ -8,6 +8,10 @@ const subscriptionPaymentSchema = new mongoose.Schema({
   amount: { type: Number, required: true },
   currency: { type: String, required: true },
   paidAt: { type: Date, required: true },
+  entitlementStartedAt: { type: Date, default: null },
+  entitlementExpiresAt: { type: Date, default: null },
+  refundedAt: { type: Date, default: null },
+  refundedAmount: { type: Number, default: 0 },
 }, { timestamps: true });
 
 export default mongoose.model("SubscriptionPayment", subscriptionPaymentSchema);

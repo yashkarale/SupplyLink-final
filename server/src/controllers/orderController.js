@@ -9,6 +9,19 @@ import { applyEmailWebhookStatus } from '../services/emailWebhookService.js';
 import { publishStoreEvent } from '../utils/storeEvents.js';
 import { isDatabaseWriteLimitReached } from '../utils/storageUsage.js';
 import { getProductLimitForSeller } from '../utils/planEntitlements.js';
+import { createPrivateImageDownloadUrl, destroyCloudinaryImage, inspectUploadedImage, uploadImageToCloudinary } from '../services/mediaStorage.js';
+import { createNotification } from './notificationController.js';
+
+const isPaymentProofStorageConfigured = () => Boolean(
+  process.env.API_PUBLIC_URL && process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET,
+);
+
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0));
 
 export const VALID_ORDER_STATUSES = [
   'PENDING',
@@ -54,14 +67,38 @@ export const validateOrderStatusTransition = (currentStatus, nextStatus) => {
 const generateOrderReference = () =>
   `SL-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 
+const deriveOrderSecret = (purpose, sellerId, requestId) => crypto
+  .createHash("sha256")
+  .update(`supplylink:${purpose}:${sellerId}:${requestId}`)
+  .digest("base64url");
+
+const sendExistingIdempotentOrder = async (res, sellerId, requestId) => {
+  const order = await Order.findOne({ sellerId, clientRequestId: requestId }).lean();
+  if (!order) return false;
+  const trackingToken = deriveOrderSecret("tracking", sellerId, requestId);
+  const paymentProofToken = order.paymentMethod === "WHATSAPP"
+    ? deriveOrderSecret("payment-proof", sellerId, requestId)
+    : undefined;
+  res.status(200).json({
+    success: true,
+    message: "This order was already received.",
+    order: { orderReference: order.orderReference, orderStatus: order.orderStatus, totalAmount: order.totalAmount },
+    trackingToken,
+    ...(paymentProofToken ? { paymentProofToken } : {}),
+    emailDelivery: order.emailDelivery.map(({ recipient, status }) => ({ recipient, status })),
+  });
+  return true;
+};
+
 const normalizeCustomer = (customer) => {
   const payload = customer || {};
   const name = String(payload.name || '').trim();
   const phone = String(payload.phone || '').trim();
   const address = String(payload.address || '').trim();
+  const postalCode = String(payload.postalCode || '').trim();
 
-  if (!name || !phone || !address) {
-    throw new Error('Customer name, phone, and address are required');
+  if (!name || !phone || !address || !postalCode) {
+    throw new Error('Customer name, phone, delivery address, and postal PIN code are required');
   }
 
   const email = String(payload.email || '').trim();
@@ -71,13 +108,15 @@ const normalizeCustomer = (customer) => {
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new Error('Enter a valid email address');
   }
+  if (!/^[+0-9() .-]{8,24}$/.test(phone) || phone.replace(/\D/g, '').length < 8) throw new Error('Enter a valid phone number');
+  if (!/^\d{6}$/.test(postalCode)) throw new Error('Enter a valid 6-digit postal PIN code');
 
   return {
     name,
     phone,
     email,
     city: String(payload.city || '').trim().slice(0, 120),
-    postalCode: String(payload.postalCode || '').trim().slice(0, 24),
+    postalCode,
     address,
     notes: String(payload.notes || '').trim().slice(0, 500),
   };
@@ -85,7 +124,7 @@ const normalizeCustomer = (customer) => {
 
 const normalizePaymentMethod = (paymentMethod) => {
   const value = String(paymentMethod || 'COD').trim().toUpperCase();
-  const allowed = ['COD', 'UPI', 'BANK_TRANSFER', 'CARD'];
+  const allowed = ['COD', 'UPI', 'BANK_TRANSFER', 'CARD', 'WHATSAPP'];
 
   if (!allowed.includes(value)) {
     throw new Error('Unsupported payment method');
@@ -118,9 +157,22 @@ export const createPublicOrder = async (req, res) => {
       });
     }
 
+    const requestId = String(req.body?.requestId || "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+      return res.status(400).json({ success: false, message: "A valid checkout requestId is required." });
+    }
+    if (await sendExistingIdempotentOrder(res, seller.userId, requestId)) return;
+
+    const paymentMethod = normalizePaymentMethod(req.body?.paymentMethod);
+    if (paymentMethod === 'WHATSAPP' && !seller.paymentQrUrl) {
+      return res.status(400).json({ success: false, message: 'This seller has not uploaded a payment QR yet.' });
+    }
+    if (paymentMethod === 'WHATSAPP' && !isPaymentProofStorageConfigured()) {
+      return res.status(503).json({ success: false, message: 'Secure payment screenshot storage is not configured. No order was saved.' });
+    }
+
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     const customer = normalizeCustomer(req.body?.customer);
-    const paymentMethod = normalizePaymentMethod(req.body?.paymentMethod);
 
     if (items.length === 0) {
       return res.status(400).json({
@@ -227,8 +279,10 @@ export const createPublicOrder = async (req, res) => {
     const shippingAmount = 0;
     const discountAmount = 0;
     const totalAmount = Math.max(0, subtotal + shippingAmount - discountAmount);
-    const trackingToken = crypto.randomBytes(32).toString('base64url');
+    const trackingToken = deriveOrderSecret("tracking", seller.userId, requestId);
     const trackingTokenHash = crypto.createHash('sha256').update(trackingToken).digest('hex');
+    const paymentProofToken = paymentMethod === 'WHATSAPP' ? deriveOrderSecret("payment-proof", seller.userId, requestId) : '';
+    const paymentProofTokenHash = paymentProofToken ? crypto.createHash('sha256').update(paymentProofToken).digest('hex') : '';
 
     const session = await mongoose.startSession();
 
@@ -252,9 +306,15 @@ export const createPublicOrder = async (req, res) => {
         createdOrder = await Order.create(
           [{
             sellerId: seller.userId,
+            clientRequestId: requestId,
             orderReference: generateOrderReference(),
             trackingTokenHash,
             trackingTokenExpiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+            ...(paymentProofTokenHash ? {
+              paymentProofTokenHash,
+              paymentProofTokenExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+              paymentPendingUntil: new Date(Date.now() + 24 * 60 * 60 * 1000),
+            } : {}),
             customer,
             items: snapshotItems,
             subtotal,
@@ -303,6 +363,15 @@ export const createPublicOrder = async (req, res) => {
         console.error('Order email status could not be recorded:', emailStatusError.message);
       }
 
+      createNotification({
+        sellerId: seller.userId,
+        type: "order_created",
+        title: "New order received",
+        message: `Order ${persistedOrder.orderReference} from ${customer.name} for ${formatCurrency(persistedOrder.totalAmount)}`,
+        data: { orderReference: persistedOrder.orderReference, totalAmount: persistedOrder.totalAmount, customerName: customer.name },
+        link: `/orders/${persistedOrder._id}`,
+      }).catch((error) => console.error("Failed to create order notification:", error.message));
+
       return res.status(201).json({
         success: true,
         message: 'Order placed successfully',
@@ -312,10 +381,12 @@ export const createPublicOrder = async (req, res) => {
           totalAmount: createdOrder[0].totalAmount,
         },
         trackingToken,
+        ...(paymentProofToken ? { paymentProofToken } : {}),
         emailDelivery: emailDelivery.map(({ recipient, status }) => ({ recipient, status })),
       });
     } catch (error) {
       console.error('Create public order error:', error.message);
+      if (error.code === 11000 && await sendExistingIdempotentOrder(res, seller.userId, requestId)) return;
       return res.status(error.status || 500).json({
         success: false,
         message: error.status === 409 ? error.message : 'Unable to place order',
@@ -329,6 +400,134 @@ export const createPublicOrder = async (req, res) => {
       success: false,
       message: error.message || 'Unable to place order',
     });
+  }
+};
+
+export const uploadPublicPaymentProof = async (req, res) => {
+  let uploaded;
+  try {
+    const slug = normalizeStoreSlug(req.params.slug);
+    const reference = String(req.params.reference || '');
+    const token = String(req.query.token || '');
+    if (!/^[A-Za-z0-9_-]{40,50}$/.test(token)) return res.status(404).json({ success: false, message: 'Payment upload link is invalid or expired.' });
+    const seller = await Seller.findOne({ storeSlug: slug, isPublished: true, status: { $ne: 'suspended' } }).select('userId storeSlug').lean();
+    if (!seller) return res.status(404).json({ success: false, message: 'Store not found.' });
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const order = await Order.findOne({
+      sellerId: seller.userId,
+      orderReference: reference,
+      paymentMethod: 'WHATSAPP',
+      paymentStatus: 'PENDING',
+      orderStatus: 'PENDING',
+      paymentProofTokenHash: tokenHash,
+      paymentProofTokenExpiresAt: { $gt: new Date() },
+    }).select('+paymentProofTokenHash +paymentProofTokenExpiresAt +paymentProofPublicId');
+    if (!order) return res.status(409).json({ success: false, message: 'This order cannot accept a payment screenshot. Check the link or contact the seller.' });
+    if (order.paymentProofUploadedAt && order.paymentProofPublicId) {
+      return res.status(200).json({ success: true, alreadyUploaded: true, message: 'Screenshot is already saved for seller review.' });
+    }
+
+    const inspected = inspectUploadedImage(req.body, req.headers['content-type'], 'payment-proof');
+    uploaded = await uploadImageToCloudinary({
+      buffer: req.body,
+      contentType: req.headers['content-type'],
+      folder: 'supplylink/payment-proofs',
+      publicId: `${order._id}-${crypto.randomUUID()}`,
+      deliveryType: 'authenticated',
+    });
+    const result = await Order.updateOne({
+      _id: order._id,
+      paymentProofTokenHash: tokenHash,
+      paymentProofUploadedAt: null,
+      paymentStatus: 'PENDING',
+    }, {
+      $set: {
+        paymentProofPublicId: uploaded.publicId,
+        paymentProofFormat: uploaded.format,
+        paymentProofUploadedAt: new Date(),
+        paymentProofDeleteAfter: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+      },
+    });
+    if (result.modifiedCount !== 1) {
+      await destroyCloudinaryImage(uploaded.publicId, 'authenticated').catch((error) => console.error('Orphan payment screenshot cleanup failed:', error.message));
+      return res.status(409).json({ success: false, message: 'A payment screenshot was already submitted for this order.' });
+    }
+    publishStoreEvent(seller.storeSlug, 'order.payment-proof-uploaded');
+    return res.status(201).json({ success: true, message: 'Screenshot uploaded for seller review.', image: { width: inspected.width, height: inspected.height } });
+  } catch (error) {
+    console.error('Payment screenshot upload failed:', error.message);
+    return res.status(error.status || 502).json({ success: false, message: error.message || 'Unable to upload the payment screenshot.' });
+  }
+};
+
+export const getPublicPaymentProof = async (req, res) => {
+  try {
+    const slug = normalizeStoreSlug(req.params.slug);
+    const reference = String(req.query.reference || '');
+    const token = String(req.query.token || '');
+    if (!/^[A-Za-z0-9_-]{40,50}$/.test(token)) return res.status(404).send('Payment screenshot link is invalid or expired.');
+    const seller = await Seller.findOne({ storeSlug: slug, isPublished: true, status: { $ne: 'suspended' } }).select('userId').lean();
+    if (!seller) return res.status(404).send('Store not found.');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const order = await Order.findOne({
+      sellerId: seller.userId,
+      orderReference: reference,
+      paymentProofTokenHash: tokenHash,
+      paymentProofTokenExpiresAt: { $gt: new Date() },
+      paymentProofUploadedAt: { $ne: null },
+    }).select('+paymentProofPublicId +paymentProofFormat').lean();
+    if (!order?.paymentProofPublicId) return res.status(404).send('Payment screenshot link is invalid or expired.');
+    const downloadUrl = createPrivateImageDownloadUrl({
+      publicId: order.paymentProofPublicId,
+      format: order.paymentProofFormat,
+      expiresAt: Math.floor(Date.now() / 1000) + 10 * 60,
+    });
+    res.set('Cache-Control', 'private, no-store');
+    return res.redirect(302, downloadUrl);
+  } catch (error) {
+    console.error('Public payment proof access failed:', error.message);
+    return res.status(error.status || 500).send(error.message || 'Unable to open payment screenshot.');
+  }
+};
+
+export const getSellerPaymentProof = async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ success: false, message: 'Order not found.' });
+  try {
+    const order = await Order.findOne({ _id: req.params.id, sellerId: req.user.userId, paymentProofUploadedAt: { $ne: null } })
+      .select('+paymentProofPublicId +paymentProofFormat').lean();
+    if (!order?.paymentProofPublicId) return res.status(404).json({ success: false, message: 'Payment screenshot not found.' });
+    const url = createPrivateImageDownloadUrl({ publicId: order.paymentProofPublicId, format: order.paymentProofFormat, expiresAt: Math.floor(Date.now() / 1000) + 5 * 60 });
+    return res.status(200).json({ success: true, url, expiresInSeconds: 300 });
+  } catch (error) {
+    console.error('Seller payment proof access failed:', error.message);
+    return res.status(error.status || 500).json({ success: false, message: error.message || 'Unable to open payment screenshot.' });
+  }
+};
+
+export const confirmSellerManualPayment = async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ success: false, message: 'Order not found.' });
+  const session = await mongoose.startSession();
+  try {
+    let order;
+    await session.withTransaction(async () => {
+      order = await Order.findOne({ _id: req.params.id, sellerId: req.user.userId }).session(session);
+      if (!order) throw Object.assign(new Error('Order not found.'), { status: 404 });
+      if (order.paymentMethod !== 'WHATSAPP' || !order.paymentProofUploadedAt || order.paymentStatus !== 'PENDING' || order.orderStatus !== 'PENDING') {
+        throw Object.assign(new Error('Only a pending WhatsApp order with an uploaded screenshot can be confirmed.'), { status: 409 });
+      }
+      order.paymentStatus = 'VERIFIED';
+      order.paymentVerificationMethod = 'SELLER_MANUAL';
+      order.paymentVerifiedAt = new Date();
+      order.paymentVerifiedBy = req.user.userId;
+      order.orderStatus = 'CONFIRMED';
+      order.statusHistory.push({ from: 'PENDING', to: 'CONFIRMED', changedAt: new Date() });
+      await order.save({ session });
+    });
+    return res.status(200).json({ success: true, message: 'Payment confirmation recorded by seller.', order });
+  } catch (error) {
+    return res.status(error.status || 500).json({ success: false, message: error.message || 'Unable to confirm payment.' });
+  } finally {
+    await session.endSession();
   }
 };
 
@@ -417,6 +616,17 @@ export const updateSellerOrderStatus = async (req, res) => {
       const nextStatus = String(req.body.orderStatus || order.orderStatus || 'PENDING').toUpperCase();
       validateOrderStatusTransition(order.orderStatus, nextStatus);
 
+      if (order.paymentMethod === 'WHATSAPP' && order.paymentStatus !== 'VERIFIED' && nextStatus !== 'CANCELLED') {
+        const paymentError = new Error('Check and confirm the WhatsApp payment before processing this order.');
+        paymentError.status = 409;
+        throw paymentError;
+      }
+      if (nextStatus === 'CANCELLED' && order.paymentStatus === 'VERIFIED') {
+        const refundError = new Error('This order is paid. Record a refund before cancelling it.');
+        refundError.status = 409;
+        throw refundError;
+      }
+
       const previousStatus = order.orderStatus;
       if (nextStatus === 'CANCELLED' && previousStatus !== 'CANCELLED') {
         for (const item of order.items) {
@@ -432,9 +642,19 @@ export const updateSellerOrderStatus = async (req, res) => {
       }
 
       order.orderStatus = nextStatus;
+      if (nextStatus === 'CANCELLED' && order.paymentStatus === 'PENDING') order.paymentStatus = 'FAILED';
       order.statusHistory.push({ from: previousStatus, to: nextStatus, changedAt: new Date() });
       await order.save({ session });
       updatedOrder = order;
+
+      createNotification({
+        sellerId: req.user.userId,
+        type: "order_status_changed",
+        title: "Order status updated",
+        message: `Order ${order.orderReference} is now ${nextStatus.toLowerCase()}`,
+        data: { orderReference: order.orderReference, orderStatus: nextStatus, previousStatus },
+        link: `/orders/${order._id}`,
+      }).catch((error) => console.error("Failed to create order status notification:", error.message));
     });
 
     return res.status(200).json({
@@ -448,6 +668,7 @@ export const updateSellerOrderStatus = async (req, res) => {
     if (error.status === 404) {
       return res.status(404).json({ success: false, message: error.message });
     }
+    if (error.status === 409) return res.status(409).json({ success: false, message: error.message });
     if (error.message && error.message.toLowerCase().includes('invalid order status')) {
       return res.status(400).json({
         success: false,

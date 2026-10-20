@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import app from "./app.js";
 import connectDB from "./config/database.js";
 import { getOrderWriteLimitBytes } from "./utils/storageUsage.js";
+import { expireUnpaidWhatsAppOrders } from "./services/orderExpirationService.js";
 
 process.env.PORT ||= "5000";
 process.env.CLIENT_URL ||= "http://localhost:5173";
@@ -30,11 +31,16 @@ const startServer = async () => {
     const server = app.listen(PORT, () => {
       console.log(`Supply Link API listening on port ${PORT}`);
     });
+    const orderExpiryTimer = setInterval(() => {
+      expireUnpaidWhatsAppOrders().catch((error) => console.error("Order expiry job failed:", error.message));
+    }, 5 * 60 * 1000);
+    orderExpiryTimer.unref();
 
     let shuttingDown = false;
     const shutdown = (signal) => {
       if (shuttingDown) return;
       shuttingDown = true;
+      clearInterval(orderExpiryTimer);
       console.log(`${signal} received; closing HTTP and database connections`);
       const forceExit = setTimeout(() => {
         server.closeAllConnections?.();

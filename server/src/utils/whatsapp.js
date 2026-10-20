@@ -8,7 +8,7 @@ export const normalizeE164 = (value) => {
   return compact;
 };
 
-export const buildWhatsAppUrl = ({ businessName, whatsapp, product, items = [] }) => {
+export const buildWhatsAppUrl = ({ businessName, whatsapp, product, items = [], orderReference = "", paymentProofUrl = "" }) => {
   const normalized = normalizeE164(whatsapp);
   if (!normalized) return "";
 
@@ -23,7 +23,9 @@ export const buildWhatsAppUrl = ({ businessName, whatsapp, product, items = [] }
       return `• ${name} × ${quantity} — ₹${(Number(item.price) * quantity).toFixed(2)}`;
     });
     const estimate = items.slice(0, 20).reduce((sum, item) => sum + Number(item.price || 0) * Math.max(1, Number(item.quantity) || 1), 0);
-    message = `Hi ${store}, I would like to ask about this order request:\n${lines.join("\n")}\nEstimated listed total: ₹${estimate.toFixed(2)}. This is only a WhatsApp inquiry; no Supply Link order has been placed and stock is not reserved.`;
+    message = orderReference
+      ? `${paymentProofUrl ? `Hi ${store}, I have submitted payment for my Supply Link order. Please verify it in your payment app before processing.` : `Hi ${store}, I want to buy these items.`} Order reference: ${String(orderReference).slice(0, 80)}:\n${lines.join("\n")}\nEstimated total: ₹${estimate.toFixed(2)}.${paymentProofUrl ? `\nPayment screenshot (private link): ${paymentProofUrl}` : " Please confirm availability, delivery, and payment."}`
+      : `Hi ${store}, I want to buy these items:\n${lines.join("\n")}\nEstimated listed total: ₹${estimate.toFixed(2)}. This is an inquiry only; no Supply Link order is placed and stock is not reserved. Please confirm availability, delivery, and payment.`;
   }
 
   const url = new URL(`https://wa.me/${normalized.slice(1)}`);

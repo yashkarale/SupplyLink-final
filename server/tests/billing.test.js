@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addOneMonth, isCapturedSubscriptionPayment } from "../src/controllers/billingController.js";
+import { addOneMonth, isCapturedSubscriptionPayment, isRazorpayConfigurationAllowed } from "../src/controllers/billingController.js";
 import { getPlanConfig, PLAN_ORDER } from "../src/config/subscriptionPlans.js";
 
 describe("subscription plans", () => {
@@ -19,6 +19,13 @@ describe("subscription plans", () => {
 
   it("rejects unsupported plans", () => {
     expect(() => getPlanConfig("enterprise")).toThrow("Unsupported subscription plan");
+  });
+
+  it("refuses live Razorpay keys in staging", () => {
+    expect(isRazorpayConfigurationAllowed({ keyId: "rzp_test_staging", nodeEnv: "staging" })).toBe(true);
+    expect(isRazorpayConfigurationAllowed({ keyId: "rzp_live_production", nodeEnv: "staging" })).toBe(false);
+    expect(isRazorpayConfigurationAllowed({ keyId: "rzp_live_production", nodeEnv: "production" })).toBe(true);
+    expect(isRazorpayConfigurationAllowed({ keyId: "", nodeEnv: "staging" })).toBe(false);
   });
 
   it("requires a captured payment matching the seller, plan, amount, and order", () => {

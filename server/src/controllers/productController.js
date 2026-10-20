@@ -4,6 +4,9 @@ import Seller from "../models/Seller.js";
 import { publishStoreEvent } from "../utils/storeEvents.js";
 import { getProductLimitForSeller } from "../utils/planEntitlements.js";
 import { isDatabaseWriteLimitReached } from "../utils/storageUsage.js";
+import { destroyCloudinaryImage, inspectUploadedImage, uploadImageToCloudinary } from "../services/mediaStorage.js";
+import { createNotification } from "./notificationController.js";
+import crypto from "node:crypto";
 
 const isDatabaseAtWriteLimit = async () => {
   try {
@@ -287,41 +290,41 @@ export const updateInventory = async (req, res) => {
     if (await isDatabaseAtWriteLimit()) {
       return res.status(503).json({ success: false, message: "Inventory changes are temporarily paused while database capacity is prepared." });
     }
-    const product = await Product.findOne({
-      _id: req.params.id,
-      sellerId: req.user.userId,
-    });
+    const hasStock = Object.prototype.hasOwnProperty.call(req.body || {}, "stock");
+    const hasDelta = Object.prototype.hasOwnProperty.call(req.body || {}, "delta");
+    if (hasStock === hasDelta) {
+      return res.status(400).json({ success: false, message: "Provide exactly one of stock or delta" });
+    }
+
+    const value = Number(hasStock ? req.body.stock : req.body.delta);
+    if (!Number.isSafeInteger(value) || Math.abs(value) > 10_000_000 || (hasStock && value < 0)) {
+      return res.status(400).json({ success: false, message: "Stock changes must be whole numbers between 0 and 10,000,000" });
+    }
+
+    const filter = { _id: req.params.id, sellerId: req.user.userId };
+    const update = hasStock ? { $set: { stock: value } } : { $inc: { stock: value } };
+    if (!hasStock && value < 0) filter.stock = { $gte: -value };
+    const product = await Product.findOneAndUpdate(filter, update, { new: true, runValidators: true });
 
     if (!product) {
-      return res.status(404).json({
+      const exists = await Product.exists({ _id: req.params.id, sellerId: req.user.userId });
+      return res.status(exists ? 409 : 404).json({
         success: false,
-        message: "Product not found",
+        message: exists ? "Stock cannot become negative" : "Product not found",
       });
     }
-
-    const requestedStock = Number(req.body.stock);
-    const delta = Number(req.body.delta ?? 0);
-
-    if (Number.isFinite(requestedStock)) {
-      if (requestedStock < 0) {
-        return res.status(400).json({
-          success: false,
-          message: "Stock cannot be negative",
-        });
-      }
-
-      product.stock = requestedStock;
-    } else if (Number.isFinite(delta)) {
-      product.stock = Math.max(0, Number(product.stock) + delta);
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: "Provide either stock or delta",
-      });
-    }
-
-    await product.save();
     await notifyPublicStore(req.user.userId);
+
+    if (Number(product.stock) <= Number(product.lowStockThreshold || 5)) {
+      createNotification({
+        sellerId: req.user.userId,
+        type: "stock_low",
+        title: "Low stock alert",
+        message: `Product "${product.name}" is running low (${product.stock} left).`,
+        data: { productId: product._id, productName: product.name, stock: product.stock, threshold: product.lowStockThreshold },
+        link: `/inventory`,
+      }).catch((error) => console.error("Failed to create low stock notification:", error.message));
+    }
 
     return res.status(200).json({
       success: true,
@@ -330,9 +333,41 @@ export const updateInventory = async (req, res) => {
     });
   } catch (error) {
     console.error("Inventory update error:", error.message);
-    return res.status(500).json({
+    return res.status(error.name === "CastError" ? 404 : 500).json({
       success: false,
       message: "Unable to update inventory",
     });
+  }
+};
+
+export const uploadProductImage = async (req, res) => {
+  let uploaded;
+  try {
+    const inspected = inspectUploadedImage(req.body, req.headers["content-type"], "product-image");
+    const product = await Product.findOne({ _id: req.params.id, sellerId: req.user.userId });
+    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
+    if (product.images.length >= 8) return res.status(409).json({ success: false, message: "A product can have at most 8 images." });
+
+    uploaded = await uploadImageToCloudinary({
+      buffer: req.body,
+      contentType: req.headers["content-type"],
+      folder: "supplylink/product-images",
+      publicId: `${req.user.userId}-${req.params.id}-${crypto.randomUUID()}`,
+      deliveryType: "upload",
+    });
+    if (!uploaded.secureUrl?.startsWith("https://")) throw Object.assign(new Error("Image storage did not return a secure URL."), { status: 502 });
+
+    product.images.push(uploaded.secureUrl);
+    await product.save();
+    await notifyPublicStore(req.user.userId);
+    return res.status(201).json({
+      success: true,
+      image: { url: uploaded.secureUrl, width: inspected.width, height: inspected.height },
+      product,
+    });
+  } catch (error) {
+    if (uploaded?.publicId) await destroyCloudinaryImage(uploaded.publicId).catch((cleanupError) => console.error("Orphan product image cleanup failed:", cleanupError.message));
+    console.error("Product image upload failed:", error.message);
+    return res.status(error.status || 502).json({ success: false, message: error.message || "Unable to upload product image." });
   }
 };

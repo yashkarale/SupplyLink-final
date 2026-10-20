@@ -85,6 +85,7 @@ The Free plan currently allows two non-archived products. The server checks app 
 - `SUPPLY_LINK_CAPACITY_AND_COSTS.md` - schema-based storage estimates and current vendor references.
 - `SUPPLY_LINK_BUSINESS_MODEL.md` - scenario assumptions and illustrative unit economics.
 - `DEPLOYMENT.md` - environment and staging steps.
+- `LAUNCH_CHECKLIST.md` - verified, failed, blocked, and untested launch checks.
 
 ## Important note
 

@@ -1,106 +1,92 @@
-
-import { useEffect, useState } from "react";
-import { AlertTriangle, Boxes, PackageCheck } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useOutletContext } from "react-router-dom";
+import { AlertTriangle, Boxes, CheckCircle2, PackageCheck, AlertCircle, Search } from "lucide-react";
 import PageHeader from "../components/ui/PageHeader";
+import SkeletonLoader from "../components/ui/SkeletonLoader";
+import EmptyState from "../components/ui/EmptyState";
+import Button from "../components/ui/Button";
+import Modal from "../components/ui/Modal";
 import { fetchProducts, updateInventory } from "../services/api";
 
-const normalizeProduct = (product) => ({
-  id: product?._id || product?.id || `PRD-${Date.now()}`,
-  name: product?.name || "Untitled product",
-  category: product?.category || "Other",
-  price: Number(product?.price ?? 0),
-  stock: Number(product?.stock ?? 0),
-  sold: Number(product?.sold ?? 0),
-  status: Number(product?.stock ?? 0) > 0 ? "Active" : "Out of stock",
-  color: "#dce8df",
-  initials: (product?.name || "PR").slice(0, 2).toUpperCase(),
-});
+const normalizeProduct = (product) => ({ id: product?._id || product?.id || "", name: product?.name || "Untitled product", category: product?.category || "Other", price: Number(product?.price ?? 0), stock: Number(product?.stock ?? 0), threshold: Number(product?.lowStockThreshold ?? 5), sku: product?.sku || "" });
+const getAlertThreshold = (product, override) => override === "" ? product.threshold : Number(override);
+const inputClass = "w-full rounded-[var(--radius-control)] border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--ink)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]";
 
 export default function Inventory() {
+  const { theme = "light" } = useOutletContext() || {};
   const [products, setProducts] = useState([]);
-  const [threshold, setThreshold] = useState(10);
+  const [loading, setLoading] = useState(true);
+  const [threshold, setThreshold] = useState("");
   const [message, setMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("All");
+  const [sortBy, setSortBy] = useState("name");
+  const [adjustingProduct, setAdjustingProduct] = useState(null);
+  const [adjustValue, setAdjustValue] = useState("");
+  const [submittingAdjust, setSubmittingAdjust] = useState(false);
 
+  const loadProducts = async () => {
+    try { const response = await fetchProducts(); setProducts((Array.isArray(response?.products) ? response.products : []).map(normalizeProduct)); }
+    catch (err) { setErrorMessage(err?.response?.data?.message || err?.message || "Unable to load inventory data."); }
+    finally { setLoading(false); }
+  };
   useEffect(() => {
-    const loadProducts = async () => {
-      try {
-        const response = await fetchProducts();
-        const list = Array.isArray(response?.products) ? response.products : [];
-        setProducts(list.map(normalizeProduct));
-      } catch {
-        setProducts([]);
-      }
-    };
-
-    loadProducts();
+    let active = true;
+    fetchProducts()
+      .then((response) => {
+        if (active) setProducts((Array.isArray(response?.products) ? response.products : []).map(normalizeProduct));
+      })
+      .catch((err) => {
+        if (active) setErrorMessage(err?.response?.data?.message || err?.message || "Unable to load inventory data.");
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, []);
 
-  const changeStock = async (id, value) => {
-    if (value === "" || !Number.isInteger(Number(value)) || Number(value) < 0) return;
+  const low = products.filter((p) => p.stock > 0 && p.stock <= getAlertThreshold(p, threshold));
+  const empty = products.filter((p) => p.stock === 0);
+  const filtered = useMemo(() => products.filter((p) => {
+    const q = search.trim().toLowerCase();
+    const matches = !q || `${p.name} ${p.category} ${p.id} ${p.sku}`.toLowerCase().includes(q);
+    const matchesFilter = filter === "All" || (filter === "In stock" && p.stock > getAlertThreshold(p, threshold)) || (filter === "Low stock" && p.stock > 0 && p.stock <= getAlertThreshold(p, threshold)) || (filter === "Out of stock" && p.stock === 0);
+    return matches && matchesFilter;
+  }).sort((a,b) => sortBy === "stock-asc" ? a.stock-b.stock : sortBy === "stock-desc" ? b.stock-a.stock : sortBy === "price-desc" ? b.price-a.price : sortBy === "price-asc" ? a.price-b.price : a.name.localeCompare(b.name)), [products, search, filter, threshold, sortBy]);
 
-    const nextValue = Number(value);
-    const item = products.find((product) => product.id === id);
-
-    if (!item) return;
-
+  const openAdjust = (product) => { setAdjustingProduct(product); setAdjustValue(String(product.stock)); setErrorMessage(""); setMessage(""); };
+  const closeAdjust = () => { if (submittingAdjust) return; setAdjustingProduct(null); setAdjustValue(""); };
+  const submitAdjust = async (event) => {
+    event.preventDefault(); if (!adjustingProduct) return;
+    const next = Number(adjustValue);
+    if (!Number.isInteger(next) || next < 0 || next > 10000000) { setErrorMessage("Enter a whole-number stock quantity from 0 to 10,000,000."); return; }
+    setSubmittingAdjust(true); setErrorMessage(""); setMessage("");
+    const product = adjustingProduct;
     try {
-      const result = await updateInventory(id, { stock: nextValue });
-      const updatedProduct = result?.product || { ...item, stock: nextValue, status: nextValue ? "Active" : "Out of stock" };
-
-      setProducts((prev) => prev.map((product) => {
-        const sameProduct = product.id === id;
-        return sameProduct ? { ...product, stock: Number(updatedProduct.stock ?? nextValue), status: Number(updatedProduct.stock ?? nextValue) ? "Active" : "Out of stock" } : product;
-      }));
-
-      setMessage("Inventory updated successfully.");
-    } catch {
-      setProducts((prev) => prev.map((product) => product.id === id ? { ...product, stock: nextValue, status: nextValue ? "Active" : "Out of stock" } : product));
-      setMessage("Updated locally. The backend rejected the stock change.");
-    }
+      const result = await updateInventory(product.id, { stock: next });
+      const saved = result?.product;
+      setProducts((prev) => prev.map((item) => item.id === product.id ? normalizeProduct(saved || { ...item, stock: next }) : item));
+      setMessage(`Stock for “${product.name}” updated to ${Number(saved?.stock ?? next)}.`);
+      setAdjustingProduct(null); setAdjustValue("");
+    } catch (err) { setErrorMessage(err?.response?.data?.message || err?.message || "Unable to update stock on the server."); }
+    finally { setSubmittingAdjust(false); }
   };
 
-  const low = products.filter((p) => p.stock > 0 && p.stock <= threshold);
-  const empty = products.filter((p) => p.stock === 0);
-
-  return (
-    <div>
-      <PageHeader title="Inventory" description="Monitor stock levels and identify products that need replenishment." />
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {[
-          { title: "Tracked products", value: products.length, icon: Boxes },
-          { title: "Low stock", value: low.length, icon: AlertTriangle },
-          { title: "Out of stock", value: empty.length, icon: PackageCheck },
-        ].map(({ title, value, icon: Icon }) => <div key={title} className="flex items-center gap-4 rounded-2xl border border-[#e9ede7] bg-white p-5"><div className="rounded-xl bg-[#edf4ed] p-3 text-[#347048]"><Icon size={20} /></div><div><p className="text-xs text-[#879187]">{title}</p><p className="mt-1 text-2xl font-bold text-[#25372a]">{value}</p></div></div>)}
-      </div>
-
-      <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-[#e9ede7] bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
-        <div><h2 className="text-sm font-bold text-[#26372b]">Stock threshold</h2><p className="mt-1 text-xs text-[#909b91]">Mark products at or below this level as low stock.</p></div>
-        <div className="flex items-center gap-2"><label htmlFor="threshold" className="text-xs text-[#748076]">Low-stock alert at</label><input id="threshold" type="number" min="1" max="10000" value={threshold} onChange={(e) => setThreshold(Math.max(1, Number(e.target.value) || 1))} className="w-20 rounded-xl border border-[#e1e8df] px-3 py-2 text-sm outline-none focus:border-[#659873]" /><span className="text-xs text-[#748076]">units</span></div>
-      </div>
-
-      {message && <p role="status" className="mb-4 text-xs font-medium text-[#327348]">{message}</p>}
-
-      <div className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
-        <div className="border-b border-[#eef0ec] px-5 py-5"><h2 className="text-sm font-bold text-[#26372b]">Stock levels</h2><p className="mt-1 text-xs text-[#909b91]">Edit stock quantities to reflect your inventory.</p></div>
-        {products.length === 0 ? <div className="px-5 py-8 text-sm text-[#677468]">No product data yet. Add your first product to start tracking stock.</div> : (
-          <div className="custom-scrollbar overflow-x-auto">
-            <table className="w-full min-w-[650px] text-left">
-              <thead className="bg-[#fafbf9] text-[10px] uppercase tracking-wider text-[#98a198]"><tr>{["Product", "Current stock", "Stock health", "Update quantity"].map((h) => <th key={h} className="px-5 py-3.5 font-semibold">{h}</th>)}</tr></thead>
-              <tbody className="divide-y divide-[#f0f2ee]">
-                {products.map((p) => {
-                  const health = p.stock === 0 ? "Out of stock" : p.stock <= threshold ? "Low stock" : "Healthy";
-                  return <tr key={p.id} className="hover:bg-[#fafbf9]">
-                    <td className="px-5 py-4"><p className="text-xs font-semibold text-[#354238]">{p.name}</p><p className="mt-1 text-[10px] text-[#9aa49b]">{p.id}</p></td>
-                    <td className="px-5 py-4 text-sm font-bold text-[#354238]">{p.stock}</td>
-                    <td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${health === "Healthy" ? "bg-emerald-50 text-emerald-700" : health === "Low stock" ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>{health}</span></td>
-                    <td className="px-5 py-4"><input aria-label={`Stock quantity for ${p.name}`} type="number" min="0" step="1" value={p.stock} onChange={(e) => changeStock(p.id, e.target.value)} className="w-24 rounded-lg border border-[#e1e8df] px-3 py-2 text-xs outline-none focus:border-[#659873]" /></td>
-                  </tr>;
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return <main className="min-w-0 space-y-5 text-[var(--ink)] sm:space-y-6">
+    <PageHeader title="Inventory" description="Keep an accurate count of the stock available in your catalog." theme={theme}/>
+    <section aria-label="Inventory summary" className="grid grid-cols-1 gap-3 sm:grid-cols-3">{[{title:"Tracked products",value:products.length,Icon:Boxes},{title:"Low stock",value:low.length,Icon:AlertTriangle},{title:"Out of stock",value:empty.length,Icon:PackageCheck}].map(({title,value,Icon})=><div key={title} className="flex items-center gap-3 rounded-[var(--radius-card)] border border-[var(--line)] bg-[var(--surface)] p-4"><span className="flex size-10 shrink-0 items-center justify-center border border-[var(--line)] bg-[var(--paper)] text-[var(--accent)]"><Icon size={18}/></span><div><p className="text-xs text-[var(--muted)]">{title}</p><p className="mt-1 text-lg font-semibold">{value}</p></div></div>)}</section>
+    <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--line)] bg-[var(--surface)] p-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-sm font-semibold">Low-stock alert</h2><p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">Uses each product’s saved threshold. Enter a temporary override to filter by one shared quantity.</p></div><div className="flex flex-wrap items-center gap-2"><label htmlFor="threshold" className="shrink-0 text-sm font-medium text-[var(--muted)]">Alert at</label><input id="threshold" type="number" min="0" max="10000000" value={threshold} placeholder="Default" onChange={(e)=>setThreshold(e.target.value === "" ? "" : Math.max(0,Number(e.target.value)||0))} style={{backgroundColor:"#ffffff",color:"#171b24",colorScheme:"light"}} className="h-10 w-28 rounded-[var(--radius-control)] border border-[var(--line)] px-3 text-center text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]"/><span className="text-sm text-[var(--muted)]">units</span>{threshold !== "" && <button type="button" onClick={()=>setThreshold("")} className="min-h-10 px-2 text-xs font-medium text-[var(--muted)] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]">Use product default</button>}</div></section>
+    {message && <div role="status" className="flex items-center gap-2 rounded-[var(--radius-card)] border border-[var(--success)]/30 bg-[var(--success)]/5 p-3 text-sm text-[var(--success)]"><CheckCircle2 size={16}/>{message}</div>}
+    {errorMessage && <div role="alert" className="flex items-center gap-2 rounded-[var(--radius-card)] border border-[var(--danger)]/30 bg-[var(--danger)]/5 p-3 text-sm text-[var(--danger)]"><AlertCircle size={16}/><span>{errorMessage}</span>{!loading && products.length===0 && <button type="button" onClick={()=>{setLoading(true);setErrorMessage("");loadProducts();}} className="ml-auto min-h-10 shrink-0 underline underline-offset-2">Retry</button>}</div>}
+    <section className="overflow-hidden rounded-[var(--radius-card)] border border-[var(--line)] bg-[var(--surface)]">
+      <div className="flex flex-col gap-3 border-b border-[var(--line)] p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div><h2 className="text-sm font-semibold">Stock levels</h2><p className="mt-1 text-xs text-[var(--muted)]">{filtered.length} product{filtered.length===1?"":"s"} shown</p></div><div className="grid min-w-0 gap-2 sm:flex"><label className="flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] border border-[var(--line)] bg-[var(--paper)] px-3"><Search size={15} className="shrink-0 text-[var(--muted)]"/><span className="sr-only">Search products or SKU</span><input aria-label="Search products or SKU" value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Search products or SKU" className="h-10 min-w-0 bg-transparent text-sm outline-none placeholder:text-[var(--muted)] sm:w-48"/></label><label className="sr-only" htmlFor="inventory-filter">Filter by stock state</label><select id="inventory-filter" value={filter} onChange={(e)=>setFilter(e.target.value)} className={`${inputClass} sm:w-auto`}><option value="All">All states</option><option value="In stock">In stock</option><option value="Low stock">Low stock</option><option value="Out of stock">Out of stock</option></select><label className="sr-only" htmlFor="inventory-sort">Sort products</label><select id="inventory-sort" value={sortBy} onChange={(e)=>setSortBy(e.target.value)} className={`${inputClass} sm:w-auto`}><option value="name">Name A–Z</option><option value="stock-asc">Stock low → high</option><option value="stock-desc">Stock high → low</option><option value="price-asc">Price low → high</option><option value="price-desc">Price high → low</option></select></div></div>
+      {loading ? <div className="space-y-4 p-5"><SkeletonLoader height={24} width="25%" theme={theme}/><SkeletonLoader height={90} width="100%" theme={theme}/><SkeletonLoader height={90} width="100%" theme={theme}/></div>
+        : filtered.length===0 ? <EmptyState title={products.length ? "No matching stock" : "No inventory yet"} description={products.length ? "Try a different search or stock filter." : "Products you add will appear here for stock tracking."}/>
+        : <div className="grid gap-0 divide-y divide-[var(--line)] md:grid-cols-2 md:divide-y-0 md:gap-3 md:p-3 xl:grid-cols-3">{filtered.map((p)=><article key={p.id} className="flex min-w-0 items-center justify-between gap-3 p-4 md:rounded-[var(--radius-control)] md:border md:border-[var(--line)]"><div className="min-w-0"><p className="break-words text-sm font-semibold">{p.name}</p><p className="mt-1 truncate text-xs text-[var(--muted)]">{p.sku ? `SKU ${p.sku} · ` : ""}{p.id}</p><div className="mt-2"><StockHealth product={p} threshold={getAlertThreshold(p, threshold)}/></div></div><div className="shrink-0 text-right"><p className="text-xl font-semibold tabular-nums">{p.stock}</p><p className="text-xs text-[var(--muted)]">units</p><button type="button" onClick={()=>openAdjust(p)} className="mt-2 min-h-10 rounded-[var(--radius-control)] border border-[var(--line)] px-3 text-sm font-medium hover:bg-[var(--paper)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]">Adjust stock</button></div></article>)}</div>}
+    </section>
+    <Modal isOpen={Boolean(adjustingProduct)} onClose={closeAdjust} title="Adjust stock" maxWidth="max-w-md" closeOnEscape={!submittingAdjust} closeOnBackdrop={!submittingAdjust}>
+      {adjustingProduct && <form onSubmit={submitAdjust} className="space-y-5"><div><p className="break-words font-medium">{adjustingProduct.name}</p><p className="mt-1 text-sm text-[var(--muted)]">Current quantity: {adjustingProduct.stock}</p></div><label htmlFor="inventory-adjust-value" className="block text-sm font-medium">New quantity</label><input id="inventory-adjust-value" autoFocus required type="number" min="0" max="10000000" step="1" value={adjustValue} onChange={(e)=>setAdjustValue(e.target.value)} className={inputClass}/><p className="-mt-3 text-xs text-[var(--muted)]">Enter the counted stock. The server rejects negative or out-of-range quantities.</p>{errorMessage && <p role="alert" className="rounded-[var(--radius-control)] border border-[var(--danger)]/30 bg-[var(--danger)]/5 p-3 text-sm text-[var(--danger)]">{errorMessage}</p>}<div className="flex flex-col-reverse gap-2 border-t border-[var(--line)] pt-4 sm:flex-row sm:justify-end"><Button type="button" variant="secondary" disabled={submittingAdjust} onClick={closeAdjust}>Cancel</Button><Button type="submit" loading={submittingAdjust}>Save quantity</Button></div></form>}
+    </Modal>
+  </main>;
 }
+
+function StockHealth({product,threshold}) { const label = product.stock===0 ? "Out of stock" : product.stock<=threshold ? "Low stock" : "In stock"; const color = product.stock===0 ? "text-[var(--danger)] bg-[var(--danger)]/5" : product.stock<=threshold ? "text-[var(--warning)] bg-[var(--warning-soft)]" : "text-[var(--success)] bg-[var(--success)]/5"; return <span className={`inline-flex rounded-[var(--radius-control)] px-2 py-1 text-xs font-medium ${color}`}>{label}</span>; }

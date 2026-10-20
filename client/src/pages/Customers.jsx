@@ -1,173 +1,104 @@
-import { useEffect, useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useOutletContext } from "react-router-dom";
+import { AlertCircle, ArrowUpRight, Mail, Phone, Search, Users } from "lucide-react";
 import PageHeader from "../components/ui/PageHeader";
-import StatusBadge from "../components/ui/StatusBadge";
 import EmptyState from "../components/ui/EmptyState";
+import SkeletonLoader from "../components/ui/SkeletonLoader";
+import Modal from "../components/ui/Modal";
 import { fetchOrders } from "../services/api";
 
-const getCustomerSegment = (ordersCount, totalSpent) => {
-  if (ordersCount >= 5 || totalSpent >= 10000) return "Loyal";
-  if (ordersCount >= 2 || totalSpent >= 3000) return "Returning";
-  if (ordersCount === 1 && totalSpent > 0) return "New";
-  return "At risk";
-};
+const formatCurrency = (value) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(Number(value || 0));
+const formatDate = (value) => value ? new Date(value).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "Date unavailable";
+const orderState = (value) => ({ PENDING:"Pending", CONFIRMED:"Confirmed", PROCESSING:"Processing", SHIPPED:"Shipped", DELIVERED:"Delivered", CANCELLED:"Cancelled", RETURNED:"Returned" }[String(value || "").toUpperCase()] || value || "Unknown");
+const phoneDigits = (value) => String(value || "").replace(/\D/g, "");
+const isValidTelephone = (value) => phoneDigits(value).length >= 7 && phoneDigits(value).length <= 15;
+const telephoneHref = (value) => `${String(value || "").trim().startsWith("+") ? "+" : ""}${phoneDigits(value)}`;
+const whatsappDigits = (value) => /^\+[1-9]\d{7,14}$/.test(String(value || "").replace(/[\s()-]/g, "")) ? phoneDigits(value) : "";
 
-const formatCurrency = (value) =>
-  new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(Number(value || 0));
-
-const normalizeCustomer = (order, index) => {
-  const name = order?.customer?.name || "Guest customer";
-  const email = order?.customer?.email || "";
-
-  return {
-    id: order?._id || order?.id || `CUS-${index + 1}`,
-    name,
-    email,
-    orders: 1,
-    spent: Number(order?.totalAmount ?? order?.total ?? 0),
-    lastOrder: order?.createdAt
-      ? new Date(order.createdAt).toLocaleDateString("en-IN", {
-          day: "numeric",
-          month: "short",
-        })
-      : "Recently",
-    segment: "New",
-    initials: name
-      .split(" ")
-      .map((part) => part[0])
-      .slice(0, 2)
-      .join("")
-      .toUpperCase(),
-  };
-};
+function aggregateCustomers(orders) {
+  const customers = new Map();
+  orders.forEach((order) => {
+    const contact = order?.customer || {};
+    const name = String(contact.name || "Guest customer").trim();
+    const email = String(contact.email || "").trim();
+    const phone = String(contact.phone || "").trim();
+    const normalizedPhone = phoneDigits(phone);
+    const key = normalizedPhone ? `phone:${normalizedPhone}` : email ? `email:${email.toLowerCase()}` : `name:${name.toLowerCase()}`;
+    const at = order?.createdAt ? new Date(order.createdAt).getTime() : 0;
+    const item = customers.get(key) || { key, name, email, phone, address: "", city: "", postalCode: "", orderCount: 0, orderValue: 0, lastOrderAt: "", lastOrderTime: 0, orders: [] };
+    item.orderCount += 1;
+    item.orderValue += Number(order?.totalAmount ?? order?.total ?? 0);
+    if (email && !item.email) item.email = email;
+    if (phone && !item.phone) item.phone = phone;
+    item.orders.push({ reference: order?.orderReference || order?._id || order?.id || "Order reference unavailable", status: orderState(order?.orderStatus), createdAt: order?.createdAt || "", total: Number(order?.totalAmount ?? order?.total ?? 0), paymentMethod: order?.paymentMethod || "Unknown", paymentStatus: String(order?.paymentStatus || "PENDING").toUpperCase() });
+    if (at >= item.lastOrderTime) {
+      item.lastOrderTime = at;
+      item.lastOrderAt = order?.createdAt || "";
+      item.name = name;
+      item.address = String(contact.address || "");
+      item.city = String(contact.city || "");
+      item.postalCode = String(contact.postalCode || "");
+    }
+    customers.set(key, item);
+  });
+  return [...customers.values()].map((customer) => ({ ...customer, initials: customer.name.split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0,2).join("").toUpperCase() || "CU", orders: customer.orders.sort((a,b) => new Date(b.createdAt || 0)-new Date(a.createdAt || 0)) })).sort((a,b) => b.lastOrderTime-a.lastOrderTime);
+}
 
 export default function Customers() {
+  const { theme = "light" } = useOutletContext() || {};
   const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [segment, setSegment] = useState("All segments");
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
 
+  const loadCustomers = useCallback(async () => {
+    setError("");
+    try {
+      const response = await fetchOrders();
+      const list = Array.isArray(response) ? response : Array.isArray(response?.orders) ? response.orders : [];
+      setCustomers(aggregateCustomers(list));
+    } catch (err) { setError(err?.response?.data?.message || err?.message || "Unable to load customers from orders."); }
+    finally { setLoading(false); }
+  }, []);
   useEffect(() => {
-    const loadCustomers = async () => {
-      try {
-        const response = await fetchOrders();
-        const list = Array.isArray(response) ? response : Array.isArray(response?.orders) ? response.orders : [];
-
-        if (!list.length) {
-          setCustomers([]);
-          return;
-        }
-
-        const customerMap = new Map();
-
-        list.forEach((order, index) => {
-          const normalized = normalizeCustomer(order, index);
-          const customerKey = normalized.email || normalized.name;
-          const previous = customerMap.get(customerKey);
-
-          if (!previous) {
-            const nextCustomer = { ...normalized, segment: getCustomerSegment(1, normalized.spent) };
-            customerMap.set(customerKey, nextCustomer);
-            return;
-          }
-
-          const nextCustomer = {
-            ...previous,
-            orders: previous.orders + 1,
-            spent: previous.spent + normalized.spent,
-            lastOrder: normalized.lastOrder,
-            segment: getCustomerSegment(previous.orders + 1, previous.spent + normalized.spent),
-          };
-
-          customerMap.set(customerKey, nextCustomer);
-        });
-
-        setCustomers(Array.from(customerMap.values()));
-      } catch {
-        setCustomers([]);
-      }
-    };
-
-    loadCustomers();
+    let active = true;
+    fetchOrders()
+      .then((response) => {
+        if (active) setCustomers(aggregateCustomers(Array.isArray(response) ? response : Array.isArray(response?.orders) ? response.orders : []));
+      })
+      .catch((err) => { if (active) setError(err?.response?.data?.message || err?.message || "Unable to load customers from orders."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, []);
 
-  const filteredCustomers = useMemo(
-    () =>
-      customers.filter(
-        (c) =>
-          `${c.name} ${c.email}`.toLowerCase().includes(search.toLowerCase()) &&
-          (segment === "All segments" || c.segment === segment),
-      ),
-    [customers, search, segment],
-  );
+  const filteredCustomers = useMemo(() => customers.filter((customer) => `${customer.name} ${customer.email} ${customer.phone} ${customer.city}`.toLowerCase().includes(search.trim().toLowerCase())), [customers, search]);
+  const repeatCustomers = customers.filter((customer) => customer.orderCount > 1).length;
+  const recordedValue = customers.reduce((sum, customer) => sum + customer.orderValue, 0);
 
-  return (
-    <div>
-      <PageHeader title="Customers" description="Understand your customer base and identify repeat buyers." />
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {[
-          ["Total customers", customers.length],
-          ["Repeat customers", customers.filter((c) => c.orders > 1).length],
-          ["Lifetime revenue", formatCurrency(customers.reduce((sum, c) => sum + c.spent, 0))],
-        ].map(([label, value]) => (
-          <div key={label} className="rounded-2xl border border-[#e9ede7] bg-white p-5">
-            <p className="text-xs text-[#879187]">{label}</p>
-            <p className="mt-2 text-2xl font-bold text-[#25372a]">{value}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
-        <div className="flex flex-col gap-3 border-b border-[#eef0ec] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-          <div>
-            <h2 className="text-sm font-bold text-[#26372b]">Customer directory</h2>
-            <p className="mt-1 text-xs text-[#909b91]">Customers shown: {filteredCustomers.length}</p>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <div className="flex items-center gap-2 rounded-xl border border-[#e8ede6] px-3 py-2.5">
-              <Search size={15} className="text-[#99a39a]" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search customers" className="w-full text-xs outline-none sm:w-36" />
-            </div>
-            <select value={segment} onChange={(e) => setSegment(e.target.value)} className="rounded-xl border border-[#e8ede6] bg-white px-3 py-2.5 text-xs outline-none">
-              {["All segments", "Loyal", "Returning", "New", "At risk"].map((s) => <option key={s}>{s}</option>)}
-            </select>
-          </div>
-        </div>
-        {filteredCustomers.length === 0 ? (
-          <EmptyState title="No customers found" />
-        ) : (
-          <div className="custom-scrollbar overflow-x-auto">
-            <table className="w-full min-w-[700px] text-left">
-              <thead className="bg-[#fafbf9] text-[10px] uppercase tracking-wider text-[#98a198]">
-                <tr>{["Customer", "Segment", "Orders", "Total spent", "Last order"].map((h) => <th key={h} className="px-5 py-3.5 font-semibold">{h}</th>)}</tr>
-              </thead>
-              <tbody className="divide-y divide-[#f0f2ee]">
-                {filteredCustomers.map((c) => (
-                  <tr key={c.id} className="hover:bg-[#fafbf9]">
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e8f0e7] text-xs font-bold text-[#396447]">{c.initials}</div>
-                        <div>
-                          <p className="text-xs font-semibold text-[#354238]">{c.name}</p>
-                          <p className="mt-1 text-[10px] text-[#9aa49b]">{c.email || "No email provided"}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4"><StatusBadge status={c.segment} /></td>
-                    <td className="px-5 py-4 text-xs text-[#758176]">{c.orders}</td>
-                    <td className="px-5 py-4 text-xs font-semibold text-[#354238]">{formatCurrency(c.spent)}</td>
-                    <td className="px-5 py-4 text-xs text-[#758176]">{c.lastOrder}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-      <p className="mt-4 text-[10px] text-[#9aa49b]">Customer segments are generated from real recent order activity and spending patterns, making the directory useful as soon as sales start coming in.</p>
-    </div>
-  );
+  return <main className="min-w-0 space-y-5 text-ink sm:space-y-6">
+    <PageHeader title="Customers" description="A contact directory built from customer details on your store orders." theme={theme}><span className="inline-flex min-h-10 items-center gap-2 rounded-[5px] border border-line bg-surface px-3 text-sm text-muted"><Users size={15}/><strong className="text-ink">{loading ? "—" : customers.length}</strong><span>customers</span></span></PageHeader>
+    {error && <div role="alert" className="flex flex-wrap items-center gap-2 rounded-[var(--radius-card)] border border-danger/30 bg-danger/5 p-3 text-sm text-danger"><AlertCircle size={16}/><span className="min-w-0 flex-1">{error}</span>{!loading && <button type="button" onClick={()=>{setLoading(true);loadCustomers();}} className="min-h-10 shrink-0 underline underline-offset-2">Retry</button>}</div>}
+    <section aria-label="Customer summary" className="grid grid-cols-1 gap-3 sm:grid-cols-3">{[{label:"Customers",value:loading?"—":customers.length},{label:"Repeat orderers",value:loading?"—":repeatCustomers},{label:"Value of recorded orders",value:loading?"—":formatCurrency(recordedValue)}].map(({label,value})=><div key={label} className="min-w-0 rounded-[var(--radius-card)] border border-line bg-surface p-4"><p className="text-xs text-muted">{label}</p><p className="mt-1 break-words text-lg font-semibold tabular-nums">{value}</p></div>)}</section>
+    <section className="overflow-hidden rounded-[var(--radius-card)] border border-line bg-surface">
+      <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div><h2 className="font-semibold">Customer directory</h2><p className="mt-1 text-xs text-muted">{loading?"Loading customer records…":`${filteredCustomers.length} of ${customers.length} customers`}</p></div><label className="flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] border border-line bg-paper px-3"><Search size={15} className="shrink-0 text-muted"/><span className="sr-only">Search customers</span><input aria-label="Search customers" value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Name, phone, email, city" className="h-10 min-w-0 bg-transparent text-sm outline-none placeholder:text-muted sm:w-64"/></label></div>
+      {loading ? <div className="space-y-4 p-5"><SkeletonLoader height={24} width="25%" theme={theme}/><SkeletonLoader height={100} width="100%" theme={theme}/><SkeletonLoader height={100} width="100%" theme={theme}/></div>
+        : filteredCustomers.length===0 ? <EmptyState title={error&&!customers.length?"Customer records unavailable":customers.length?"No matching customers":"No customer records yet"} description={error&&!customers.length?"Retry loading seller orders to check customer records.":customers.length?"Try a different name, phone number, email, or city.":"Customer details from storefront orders will appear here."} icon={Users}/>
+        : <div className="grid divide-y divide-line md:grid-cols-2 md:divide-y-0 md:gap-3 md:p-3 xl:grid-cols-3">{filteredCustomers.map((customer)=><CustomerCard key={customer.key} customer={customer} onSelect={()=>setSelectedCustomer(customer)}/>)}</div>}
+    </section>
+    <p className="text-xs leading-relaxed text-muted">Customer records are grouped from the orders currently returned by the seller orders API. Recorded order value includes all returned order statuses and is not a paid-spend total.</p>
+    <Modal isOpen={Boolean(selectedCustomer)} onClose={()=>setSelectedCustomer(null)} title={selectedCustomer?.name || "Customer details"} maxWidth="max-w-2xl">
+      {selectedCustomer && <CustomerDetails customer={selectedCustomer}/>}
+    </Modal>
+  </main>;
 }
+
+function CustomerCard({customer,onSelect}) {
+  const whatsapp = whatsappDigits(customer.phone);
+  return <article className="flex min-w-0 flex-col gap-3 p-4 md:rounded-[var(--radius-control)] md:border md:border-line md:bg-surface"><div className="flex min-w-0 items-start gap-3"><span aria-hidden="true" className="flex size-10 shrink-0 items-center justify-center border border-line bg-paper text-sm font-semibold text-muted">{customer.initials}</span><div className="min-w-0 flex-1"><button type="button" onClick={onSelect} className="max-w-full break-words text-left text-sm font-semibold text-ink underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]">{customer.name}</button><p className="mt-1 break-all text-xs text-muted">{customer.email || "No email on record"}</p><p className="mt-1 break-all text-xs text-muted">{customer.phone || "No phone on record"}</p></div></div><div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3"><div className="flex flex-wrap gap-x-4 gap-y-1 text-xs"><span><strong>{customer.orderCount}</strong> order{customer.orderCount===1?"":"s"}</span><span className="text-muted">{formatCurrency(customer.orderValue)} recorded value</span></div><div className="flex flex-wrap items-center gap-2">{isValidTelephone(customer.phone) && <a href={`tel:${telephoneHref(customer.phone)}`} aria-label={`Call ${customer.name}`} className="inline-flex min-h-10 items-center gap-1.5 rounded-[var(--radius-control)] border border-line px-3 text-xs font-semibold hover:bg-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]"><Phone size={14}/>Call</a>}{whatsapp && <a href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer" aria-label={`Message ${customer.name} on WhatsApp`} className="inline-flex min-h-10 items-center gap-1.5 rounded-[var(--radius-control)] border border-line px-3 text-xs font-semibold hover:bg-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]">WhatsApp<ArrowUpRight size={13}/></a>}<button type="button" onClick={onSelect} className="min-h-10 rounded-[var(--radius-control)] px-2 text-xs font-semibold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]">Details</button></div></div></article>;
+}
+function CustomerDetails({customer}) {
+  const whatsapp = whatsappDigits(customer.phone);
+  return <div className="space-y-5"><section className="grid gap-4 rounded-[var(--radius-control)] border border-line bg-paper p-4 sm:grid-cols-2"><CustomerDetail label="Phone" value={customer.phone}/><CustomerDetail label="Email" value={customer.email}/><CustomerDetail label="City" value={customer.city}/><CustomerDetail label="Postal code" value={customer.postalCode}/><CustomerDetail label="Delivery address on latest order" value={customer.address}/><CustomerDetail label="Recorded orders" value={customer.orderCount}/><CustomerDetail label="Value of recorded orders" value={formatCurrency(customer.orderValue)}/><CustomerDetail label="Latest order" value={formatDate(customer.lastOrderAt)}/></section><div className="flex flex-wrap gap-2">{isValidTelephone(customer.phone)&&<a href={`tel:${telephoneHref(customer.phone)}`} className="inline-flex min-h-10 items-center gap-2 rounded-[var(--radius-control)] border border-line px-3 text-sm font-semibold hover:bg-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]"><Phone size={15}/>Call</a>}{customer.email&&<a href={`mailto:${customer.email}`} className="inline-flex min-h-10 items-center gap-2 rounded-[var(--radius-control)] border border-line px-3 text-sm font-semibold hover:bg-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]"><Mail size={15}/>Email</a>}{whatsapp&&<a href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center gap-2 rounded-[var(--radius-control)] border border-line px-3 text-sm font-semibold hover:bg-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]">WhatsApp<ArrowUpRight size={14}/></a>}</div><section><h3 className="font-semibold">Order history</h3>{customer.orders.length ? <ol className="mt-2 divide-y divide-line rounded-[var(--radius-control)] border border-line">{customer.orders.map((order,index)=><li key={`${order.reference}-${index}`} className="flex min-w-0 flex-wrap items-center justify-between gap-3 p-3"><div className="min-w-0"><p className="break-all text-sm font-medium">{order.reference}</p><p className="mt-1 text-xs text-muted">{formatDate(order.createdAt)} · {order.paymentMethod} · payment {order.paymentStatus.toLowerCase()}</p></div><div className="flex shrink-0 flex-col items-end gap-1"><span className="text-sm font-semibold tabular-nums">{formatCurrency(order.total)}</span><span className="text-xs text-muted">{order.status}</span></div></li>)}</ol>:<p className="mt-2 text-sm text-muted">No order records.</p>}</section><p className="text-xs leading-relaxed text-muted">Recorded value sums order totals returned by the API, including cancelled or unpaid orders; it does not indicate collected or verified payment.</p></div>;
+}
+function CustomerDetail({label,value}) { return <div className="min-w-0"><p className="text-xs text-muted">{label}</p><p className="mt-1 break-words text-sm font-medium">{value || "Not provided"}</p></div>; }

@@ -36,17 +36,31 @@ export default function LandingPage() {
   const [activeProduct, setActiveProduct] = useState(0);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setActiveProduct((previous) => (previous + 1) % products.length);
-    }, 1800);
+    const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let timer;
+    const syncRotation = () => {
+      window.clearInterval(timer);
+      if (document.visibilityState === "visible" && !motionPreference.matches) {
+        timer = window.setInterval(() => {
+          setActiveProduct((previous) => (previous + 1) % products.length);
+        }, 3200);
+      }
+    };
+    syncRotation();
+    document.addEventListener("visibilitychange", syncRotation);
+    motionPreference.addEventListener?.("change", syncRotation);
 
-    return () => clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", syncRotation);
+      motionPreference.removeEventListener?.("change", syncRotation);
+    };
   }, []);
 
   const visibleProduct = products[activeProduct];
 
   return (
-    <div className="landing-shell text-[#1e2c23]">
+    <div className="landing-shell text-slate-900 dark:text-slate-100">
       <header className="landing-topbar">
         <div className="brand-wrap">
           <div className="brand-mark">S</div>
@@ -70,7 +84,7 @@ export default function LandingPage() {
 
       <main className="landing-main">
         <section className="hero-section">
-          <div className="hero-copy">
+          <div className="hero-copy motion-enter">
             <div className="eyebrow-bar">
               <span className="pulse-dot" />
               Built for social sellers
@@ -88,37 +102,28 @@ export default function LandingPage() {
               <Link to="/dashboard" className="secondary-cta">See the dashboard</Link>
             </div>
 
-            <div className="hero-metrics">
-              <div>
-                <strong>12k+</strong>
-                <span>Orders processed</span>
-              </div>
-              <div>
-                <strong>4.9/5</strong>
-                <span>Seller satisfaction</span>
-              </div>
-              <div>
-                <strong>₹3.2L</strong>
-                <span>Monthly GMV tracked</span>
-              </div>
+            <div className="hero-metrics" aria-label="Included tools">
+              <div><strong>Storefront</strong><span>Publish your catalog</span></div>
+              <div><strong>Orders</strong><span>Manage every request</span></div>
+              <div><strong>Inventory</strong><span>Track available stock</span></div>
             </div>
           </div>
 
-          <div className="hero-visual glass-panel">
-            <div className="floating-badge">Trending today</div>
+          <div className="hero-visual glass-panel motion-enter motion-enter-later">
+            <div className="floating-badge">Sample workspace preview</div>
 
             <div className="mini-widget widget-green">
               <div className="widget-topline">
-                <span>Revenue</span>
-                <span className="live-pill">Live</span>
+                <span>Seller workspace</span>
+                <span className="live-pill">Preview</span>
               </div>
-              <strong>₹48,290</strong>
-              <em>+12.8% this week</em>
+              <strong>One clear view</strong>
+              <em>Products, orders, and stock in one place</em>
             </div>
 
             <div className="mini-panel">
               <div className="panel-header">
-                <span>Top products</span>
+                <span>Example products</span>
                 <TrendingUp size={16} />
               </div>
               <div className="product-list">
@@ -138,9 +143,9 @@ export default function LandingPage() {
             </div>
 
             <div className="mini-widget widget-light">
-              <span>AI insight</span>
+              <span>Example product</span>
               <strong>{visibleProduct.name}</strong>
-              <em>{visibleProduct.price} • trending ahead of plan</em>
+              <em>{visibleProduct.price} • example listing</em>
             </div>
           </div>
         </section>
@@ -151,7 +156,7 @@ export default function LandingPage() {
             <h2>Everything to run a better store.</h2>
           </div>
 
-          <div className="feature-grid">
+          <div className="feature-grid motion-stagger-grid">
             {features.map(({ title, description, icon: Icon }) => (
               <div className="feature-card" key={title}>
                 <div className="feature-icon"><Icon size={20} /></div>
@@ -168,7 +173,7 @@ export default function LandingPage() {
             <h2>Simple plans for every stage.</h2>
           </div>
 
-          <div className="pricing-grid">
+          <div className="pricing-grid motion-stagger-grid">
             {plans.map(({ name, price, description, features, highlight }) => (
               <div className={`plan-card ${highlight ? "plan-highlight" : ""}`} key={name}>
                 <div className="plan-name-row">
@@ -196,7 +201,7 @@ export default function LandingPage() {
             <h2>Smarter decisions backed by data.</h2>
           </div>
 
-          <div className="insight-grid">
+          <div className="insight-grid motion-stagger-grid">
             <div className="insight-card">
               <div className="insight-icon"><Bot size={18} /></div>
               <h3>Demand forecasting</h3>

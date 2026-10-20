@@ -10,7 +10,9 @@ import productRoutes from "./routes/productRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
 import billingRoutes from "./routes/billingRoutes.js";
 import storeRoutes from "./routes/storeRoutes.js";
+import notificationRoutes from "./routes/notificationRoutes.js";
 import { handleResendWebhook } from "./controllers/emailWebhookController.js";
+import { handleRazorpayWebhook } from "./controllers/billingController.js";
 
 const app = express();
 
@@ -24,7 +26,7 @@ app.use(helmet({ crossOriginResourcePolicy: false }));
 morgan.token("safe-url", (req) => {
   try {
     const url = new URL(req.originalUrl || req.url || "/", "http://localhost");
-    for (const key of ["password", "email", "token", "signature", "secret", "key", "phone", "whatsapp"]) {
+    for (const key of ["password", "email", "token", "proofToken", "signature", "secret", "key", "phone", "whatsapp"]) {
       if (url.searchParams.has(key)) url.searchParams.set(key, "[redacted]");
     }
     url.pathname = url.pathname.replace(/(\/api\/orders\/track\/)[^/?]+/i, "$1[redacted]");
@@ -66,9 +68,9 @@ app.use(
 );
 
 app.use(express.json({
-  limit: "1mb",
+  limit: "3mb",
   verify: (req, res, buffer) => {
-    if (req.originalUrl.split("?")[0] === "/api/webhooks/resend") req.rawBody = Buffer.from(buffer);
+    if (["/api/webhooks/resend", "/api/webhooks/razorpay"].includes(req.originalUrl.split("?")[0])) req.rawBody = Buffer.from(buffer);
   },
 }));
 app.use(express.urlencoded({ extended: true }));
@@ -98,7 +100,9 @@ app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/billing", billingRoutes);
 app.use("/api/store", storeRoutes);
+app.use("/api/notifications", notificationRoutes);
 app.post("/api/webhooks/resend", handleResendWebhook);
+app.post("/api/webhooks/razorpay", handleRazorpayWebhook);
 
 app.use((req, res) => {
   res.status(404).json({

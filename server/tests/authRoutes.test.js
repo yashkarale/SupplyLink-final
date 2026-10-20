@@ -161,6 +161,13 @@ describe('auth routes', () => {
 
       const productsResponse = await fetch(`http://127.0.0.1:${port}/api/products/`);
       expect(productsResponse.status).toBe(401);
+
+      const imageUploadResponse = await fetch(`http://127.0.0.1:${port}/api/products/507f1f77bcf86cd799439011/images`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/png' },
+        body: new Uint8Array([1, 2, 3]),
+      });
+      expect(imageUploadResponse.status).toBe(401);
     } finally {
       await new Promise((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));

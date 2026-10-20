@@ -6,8 +6,16 @@ import { normalizeStoreSlug } from "../utils/storeSlug.js";
 import { storeEvents } from "../utils/storeEvents.js";
 import { buildWhatsAppUrl, normalizeE164 } from "../utils/whatsapp.js";
 import { getProductLimitForSeller } from "../utils/planEntitlements.js";
+import { destroyCloudinaryImage, inspectUploadedImage, uploadImageToCloudinary } from "../services/mediaStorage.js";
+import crypto from "node:crypto";
 
 const formatDayLabel = (date) => date.toLocaleDateString("en-IN", { weekday: "short" });
+
+export const isRecognizedRevenueOrder = (order) => {
+  if (["CANCELLED", "RETURNED"].includes(String(order?.orderStatus || "").toUpperCase())) return false;
+  return order?.paymentStatus === "VERIFIED"
+    || (order?.paymentMethod === "COD" && order?.orderStatus === "DELIVERED");
+};
 
 const normalizeFaqs = (value) => {
   const rawFaqs = Array.isArray(value) ? value : typeof value === "string" ? value.split(/\n+/) : [];
@@ -47,6 +55,7 @@ const serializeSeller = (seller) => ({
   description: seller.description,
   phone: seller.phone,
   whatsapp: seller.whatsapp,
+  paymentQrUrl: seller.paymentQrUrl || "",
   category: seller.category,
   faqs: Array.isArray(seller.faqs) ? seller.faqs : [],
   plan: seller.plan,
@@ -83,6 +92,8 @@ export const getSellerProfile = async (req, res) => {
 };
 
 export const onboardSeller = async (req, res) => {
+  let uploadedQr;
+  let sellerCreated = false;
   try {
     const user = await User.findById(req.user.userId);
 
@@ -130,6 +141,24 @@ export const onboardSeller = async (req, res) => {
       });
     }
 
+    const qrContentType = String(req.body.paymentQr?.contentType || "");
+    const qrBase64 = String(req.body.paymentQr?.base64 || "");
+    if (!qrBase64 || qrBase64.length > 2_900_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(qrBase64)) {
+      return res.status(400).json({ success: false, message: "Upload your payment QR to create a store." });
+    }
+    const qrBuffer = Buffer.from(qrBase64, "base64");
+    if (!qrBuffer.length || qrBuffer.toString("base64") !== qrBase64) {
+      return res.status(400).json({ success: false, message: "The payment QR image data is invalid. Choose the image again." });
+    }
+    inspectUploadedImage(qrBuffer, qrContentType, "payment-qr");
+    uploadedQr = await uploadImageToCloudinary({
+      buffer: qrBuffer,
+      contentType: qrContentType,
+      folder: "supplylink/payment-qrs",
+      publicId: `${user._id}-${crypto.randomUUID()}`,
+      deliveryType: "upload",
+    });
+
     const payload = {
       userId: user._id,
       email: user.email,
@@ -138,6 +167,8 @@ export const onboardSeller = async (req, res) => {
       description,
       phone,
       whatsapp,
+      paymentQrUrl: uploadedQr.secureUrl,
+      paymentQrPublicId: uploadedQr.publicId,
       category: category || "General",
       faqs,
       plan: "free",
@@ -147,6 +178,7 @@ export const onboardSeller = async (req, res) => {
     };
 
     const seller = await Seller.create(payload);
+    sellerCreated = true;
 
     return res.status(201).json({
       success: true,
@@ -154,6 +186,9 @@ export const onboardSeller = async (req, res) => {
       seller: serializeSeller(seller),
     });
   } catch (error) {
+    if (uploadedQr?.publicId && !sellerCreated) {
+      await destroyCloudinaryImage(uploadedQr.publicId).catch((cleanupError) => console.error("Orphan onboarding QR cleanup failed:", cleanupError.message));
+    }
     console.error("Seller onboarding error:", error.message);
     if (error.code === 11000) {
       return res.status(409).json({
@@ -162,9 +197,9 @@ export const onboardSeller = async (req, res) => {
       });
     }
 
-    return res.status(500).json({
+    return res.status(error.status || 500).json({
       success: false,
-      message: "Unable to complete seller onboarding",
+      message: error.status ? error.message : "Unable to complete seller onboarding",
     });
   }
 };
@@ -214,6 +249,34 @@ export const updateSellerStoreSettings = async (req, res) => {
   }
 };
 
+export const uploadSellerPaymentQr = async (req, res) => {
+  let uploaded;
+  try {
+    const inspected = inspectUploadedImage(req.body, req.headers["content-type"], "payment-qr");
+    const seller = await Seller.findOne({ userId: req.user.userId }).select("+paymentQrPublicId");
+    if (!seller) return res.status(404).json({ success: false, message: "Complete seller setup before uploading a payment QR." });
+
+    uploaded = await uploadImageToCloudinary({
+      buffer: req.body,
+      contentType: req.headers["content-type"],
+      folder: "supplylink/payment-qrs",
+      publicId: `${seller._id}-${crypto.randomUUID()}`,
+      deliveryType: "upload",
+    });
+    const oldPublicId = seller.paymentQrPublicId;
+    seller.paymentQrUrl = uploaded.secureUrl;
+    seller.paymentQrPublicId = uploaded.publicId;
+    seller.isPublished = true;
+    await seller.save();
+    if (oldPublicId) destroyCloudinaryImage(oldPublicId).catch((error) => console.error("Old seller QR cleanup failed:", error.message));
+
+    return res.status(200).json({ success: true, seller: serializeSeller(seller), image: { width: inspected.width, height: inspected.height } });
+  } catch (error) {
+    console.error("Seller QR upload failed:", error.message);
+    return res.status(error.status || 502).json({ success: false, message: error.message || "Unable to save the payment QR." });
+  }
+};
+
 export const getSellerDashboard = async (req, res) => {
   try {
     const [seller, products, orders] = await Promise.all([
@@ -222,7 +285,7 @@ export const getSellerDashboard = async (req, res) => {
       Order.find({ sellerId: req.user.userId }).sort({ createdAt: -1 }).lean(),
     ]);
 
-    const revenueOrders = orders.filter((order) => !["CANCELLED", "RETURNED"].includes(order.orderStatus));
+    const revenueOrders = orders.filter(isRecognizedRevenueOrder);
     const totalSales = revenueOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
     const totalOrders = orders.length;
     const averageOrderValue = revenueOrders.length > 0 ? totalSales / revenueOrders.length : 0;
@@ -330,6 +393,8 @@ export const getPublicStore = async (req, res) => {
         category: seller.category,
         contactUrl: `/api/store/${encodeURIComponent(seller.storeSlug)}/contact`,
         contactAvailable: Boolean(normalizeE164(seller.whatsapp)),
+        paymentQrUrl: seller.paymentQrUrl || "",
+        paymentProofAvailable: Boolean(process.env.API_PUBLIC_URL && process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET),
         faqs: Array.isArray(seller.faqs) ? seller.faqs : [],
       },
       products,
@@ -350,11 +415,31 @@ export const redirectToSellerWhatsApp = async (req, res) => {
       storeSlug: slug,
       isPublished: true,
       status: { $ne: "suspended" },
-    }).select("businessName whatsapp").lean();
+    }).select("businessName whatsapp userId").lean();
 
     if (!seller) return res.status(404).send("Store not found");
 
     const product = String(req.query.product || "").slice(0, 160);
+    const orderReference = String(req.query.orderReference || "").slice(0, 80);
+    const proofToken = String(req.query.proofToken || "");
+    let paymentProofUrl = "";
+    if (orderReference && proofToken) {
+      if (!/^[A-Za-z0-9_-]{40,50}$/.test(proofToken)) return res.status(400).send("Invalid payment proof token");
+      const proofHash = crypto.createHash("sha256").update(proofToken).digest("hex");
+      const order = await Order.findOne({
+        sellerId: seller.userId,
+        orderReference,
+        paymentProofTokenHash: proofHash,
+        paymentProofTokenExpiresAt: { $gt: new Date() },
+        paymentProofUploadedAt: { $ne: null },
+      }).select("_id").lean();
+      if (!order) return res.status(404).send("Payment screenshot is not available");
+      if (!process.env.API_PUBLIC_URL) return res.status(503).send("Public API URL is not configured");
+      const proofLink = new URL(`/api/store/${encodeURIComponent(slug)}/payment-proof`, process.env.API_PUBLIC_URL);
+      proofLink.searchParams.set("reference", orderReference);
+      proofLink.searchParams.set("token", proofToken);
+      paymentProofUrl = proofLink.toString();
+    }
     let items = [];
     if (req.query.items) {
       if (String(req.query.items).length > 4000) return res.status(400).send("Product list is too long");
@@ -389,7 +474,7 @@ export const redirectToSellerWhatsApp = async (req, res) => {
       });
     }
 
-    const destination = buildWhatsAppUrl({ businessName: seller.businessName, whatsapp: seller.whatsapp, product, items });
+    const destination = buildWhatsAppUrl({ businessName: seller.businessName, whatsapp: seller.whatsapp, product, items, orderReference, paymentProofUrl });
     if (!destination) return res.status(404).send("This seller has not configured a valid WhatsApp contact.");
     return res.redirect(302, destination);
   } catch (error) {

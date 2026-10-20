@@ -6,6 +6,8 @@ import Product from "../src/models/Product.js";
 import Order from "../src/models/Order.js";
 import EmailWebhookEvent from "../src/models/EmailWebhookEvent.js";
 import SubscriptionPayment from "../src/models/SubscriptionPayment.js";
+import SubscriptionCheckout from "../src/models/SubscriptionCheckout.js";
+import RazorpayWebhookEvent from "../src/models/RazorpayWebhookEvent.js";
 
 if (!process.env.MONGODB_URI) {
   throw new Error("MONGODB_URI is required to create application indexes.");
@@ -20,6 +22,8 @@ try {
     Order.createIndexes(),
     EmailWebhookEvent.createIndexes(),
     SubscriptionPayment.createIndexes(),
+    SubscriptionCheckout.createIndexes(),
+    RazorpayWebhookEvent.createIndexes(),
   ]);
   console.log("Supply Link schema indexes are current.");
 } catch (error) {

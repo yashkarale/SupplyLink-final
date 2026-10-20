@@ -43,6 +43,8 @@ const sellerSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    paymentQrUrl: { type: String, default: "" },
+    paymentQrPublicId: { type: String, default: "", select: false },
     category: {
       type: String,
       default: "General",

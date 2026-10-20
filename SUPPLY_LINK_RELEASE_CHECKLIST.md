@@ -5,7 +5,7 @@ Current release assessment: **NOT READY**.
 ## Verified locally
 
 - [x] Client production build completes.
-- [x] Server test suite passes (11 files, 28 tests after plan-capacity/storage guard unit tests).
+- [x] Server suite passes locally (15 files, 43 passed, 2 opt-in staging tests skipped; rerun 2026-10-16).
 - [x] Client lint command exits successfully with no warnings.
 - [x] Production dependency audit reports zero known vulnerabilities in both packages at audit time.
 - [x] Git whitespace check passes.

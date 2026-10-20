@@ -1,20 +1,18 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { ArrowRight, Eye, EyeOff, Layers } from "lucide-react";
 import { getSellerProfile, loginUser, registerUser, resendVerificationEmail, setAuthToken } from "../services/api";
+import "./AuthOnboarding.css";
 
 export default function AuthPage({ mode = "login" }) {
   const navigate = useNavigate();
   const isRegister = useMemo(() => mode === "register", [mode]);
-
-  const [form, setForm] = useState({
-    name: "",
-    email: "",
-    password: "",
-  });
+  const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [verificationNeeded, setVerificationNeeded] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -34,7 +32,6 @@ export default function AuthPage({ mode = "login" }) {
         password: form.password,
         ...(isRegister ? { name: form.name } : {}),
       };
-
       const result = isRegister ? await registerUser(payload) : await loginUser(payload);
 
       if (result?.token) {
@@ -59,20 +56,16 @@ export default function AuthPage({ mode = "login" }) {
         setNotice(result.message || "Check your email for a verification link before signing in.");
         return;
       }
-
       throw new Error("The server did not complete authentication. Please try again.");
     } catch (requestError) {
       const message = requestError?.response?.data?.message || requestError?.message;
-
       if (requestError?.response?.status === 403 && /verify your email/i.test(message || "")) {
         setVerificationNeeded(true);
       }
-
       if (!requestError?.response || requestError?.code === "ERR_NETWORK") {
-        setError("We couldn't reach the server. Please start the backend and try again.");
+        setError("We couldn't reach the server. Please try again in a moment.");
         return;
       }
-
       setError(message || "Authentication failed.");
     } finally {
       setLoading(false);
@@ -95,113 +88,86 @@ export default function AuthPage({ mode = "login" }) {
   };
 
   return (
-    <div className="auth-shell">
-      <div className="auth-card">
-        <div className="auth-visual">
-          <div>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-              <div style={{ width: 42, height: 42, borderRadius: 14, display: "grid", placeItems: "center", background: "rgba(255,255,255,0.12)", fontWeight: 800 }}>
-                S
-              </div>
-              <div>
-                <div style={{ fontSize: 12, letterSpacing: "0.18em", opacity: 0.8 }}>SUPPLY LINK</div>
-                <div style={{ fontSize: 20, fontWeight: 700 }}>Seller Studio</div>
-              </div>
-            </div>
+    <main className="sl-auth-page">
+      <div className="sl-auth-frame">
+        <header className="sl-auth-topbar">
+          <Link to="/" className="sl-brand" aria-label="Supply Link home">
+            <span className="sl-brand-mark"><Layers size={19} aria-hidden="true" /></span>
+            <span className="sl-brand-copy"><strong>Supply Link</strong><small>SELLER WORKSPACE</small></span>
+          </Link>
+          <p>{isRegister ? "Already have an account?" : "New to Supply Link?"}</p>
+          <Link className="sl-auth-switch" to={isRegister ? "/login" : "/register"}>
+            {isRegister ? "Sign in" : "Create an account"}
+          </Link>
+        </header>
 
-            <h1>Grow your business with smarter sales.</h1>
-            <p>
-              Manage inventory, take orders, and track daily performance from one modern workspace built for modern sellers.
+        <div className="sl-auth-layout">
+          <section className="sl-auth-intro" aria-labelledby="auth-intro-title">
+            <p className="sl-eyebrow">A calmer way to run your shop</p>
+            <h1 id="auth-intro-title">Good business starts with a clear picture.</h1>
+            <p className="sl-auth-description">
+              Keep your products, stock, orders, and customer conversations together in one practical workspace.
             </p>
-          </div>
+            <div className="sl-auth-ledger" aria-hidden="true">
+              <div><span>Products</span><b>One clear catalogue</b></div>
+              <div><span>Orders</span><b>Every request in view</b></div>
+              <div><span>Storefront</span><b>Ready to share</b></div>
+            </div>
+          </section>
 
-          <div className="feature-list">
-            <div>✓ Inventory and stock tracking</div>
-            <div>✓ AI-driven demand insights</div>
-            <div>✓ Customer and order management</div>
-          </div>
-        </div>
-
-        <div className="auth-form-panel">
-          <div style={{ marginBottom: 24 }}>
-            <p style={{ margin: 0, fontSize: 12, fontWeight: 700, letterSpacing: "0.16em", color: "#67806d", textTransform: "uppercase" }}>
-              {isRegister ? "Create account" : "Welcome back"}
-            </p>
-            <h2 style={{ margin: "8px 0 0", fontSize: "2rem", color: "#183721" }}>
-              {isRegister ? "Start selling smarter" : "Sign in to Supply Link"}
-            </h2>
-          </div>
-
-          <form onSubmit={handleSubmit}>
-            {isRegister && (
-              <div>
-                <label style={{ display: "block", fontWeight: 600, marginBottom: 8, color: "#32473c" }}>Full name</label>
-                <input
-                  type="text"
-                  name="name"
-                  value={form.name}
-                  onChange={handleChange}
-                  placeholder="Your business name"
-                  required={isRegister}
-                />
-              </div>
-            )}
-
-            <div>
-              <label style={{ display: "block", fontWeight: 600, marginBottom: 8, color: "#32473c" }}>Email</label>
-              <input
-                type="email"
-                name="email"
-                value={form.email}
-                onChange={handleChange}
-                placeholder="you@example.com"
-                required
-              />
+          <section className="sl-auth-panel" aria-labelledby="auth-form-title">
+            <div className="sl-auth-panel-heading">
+              <p className="sl-eyebrow">{isRegister ? "Create your account" : "Welcome back"}</p>
+              <h2 id="auth-form-title">{isRegister ? "Start selling smarter" : "Sign in to Supply Link"}</h2>
+              <p>{isRegister ? "Set up your seller account to create your shop." : "Sign in to continue to your seller workspace."}</p>
             </div>
 
-            <div>
-              <label style={{ display: "block", fontWeight: 600, marginBottom: 8, color: "#32473c" }}>Password</label>
-              <input
-                type="password"
-                name="password"
-                value={form.password}
-                onChange={handleChange}
-                placeholder="At least 8 characters"
-                minLength={8}
-                required
-              />
-            </div>
+            <form className="sl-auth-form" onSubmit={handleSubmit} noValidate={false}>
+              {isRegister && (
+                <div className="sl-field">
+                  <label htmlFor="auth-name">Full name</label>
+                  <input id="auth-name" autoComplete="name" type="text" name="name" value={form.name} onChange={handleChange} placeholder="Your name" required />
+                </div>
+              )}
 
-            {notice && (
-              <div role="status" style={{ color: "#285b39", background: "#eef8ef", border: "1px solid #cde5d0", borderRadius: 10, padding: 10, fontSize: 14 }}>
-                {notice}
+              <div className="sl-field">
+                <label htmlFor="auth-email">Email address</label>
+                <input id="auth-email" autoComplete="email" inputMode="email" type="email" name="email" value={form.email} onChange={handleChange} placeholder="you@example.com" required aria-invalid={Boolean(error)} aria-describedby={error ? "auth-feedback" : undefined} />
               </div>
-            )}
 
-            {error && (
-              <div style={{ color: "#9a2f35", background: "#fff0f1", border: "1px solid #f7ced2", borderRadius: 10, padding: 10, fontSize: 14 }}>
-                {error}
-                {verificationNeeded && !isRegister && (
-                  <button type="button" disabled={loading || !form.email} onClick={handleResendVerification} className="mt-2 block font-bold underline disabled:opacity-60">
-                    Resend verification email
+              <div className="sl-field">
+                <label htmlFor="auth-password">Password</label>
+                <div className="sl-password-wrap">
+                  <input id="auth-password" autoComplete={isRegister ? "new-password" : "current-password"} type={passwordVisible ? "text" : "password"} name="password" value={form.password} onChange={handleChange} placeholder={isRegister ? "At least 8 characters" : "Enter your password"} minLength={isRegister ? 8 : undefined} required aria-invalid={Boolean(error)} aria-describedby={error ? "auth-feedback" : undefined} />
+                  <button className="sl-password-toggle" type="button" onClick={() => setPasswordVisible((visible) => !visible)} aria-label={passwordVisible ? "Hide characters" : "Show characters"} aria-pressed={passwordVisible}>
+                    {passwordVisible ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
                   </button>
-                )}
+                </div>
+                {isRegister && <p className="sl-field-help">Use at least 8 characters.</p>}
               </div>
-            )}
 
-            <button className="primary-button" type="submit" disabled={loading}>
-              {loading ? (isRegister ? "Creating account..." : "Signing in...") : isRegister ? "Create account" : "Sign in"}
-            </button>
+              {notice && <div id="auth-feedback" className="sl-feedback sl-feedback--success" role="status">{notice}</div>}
+              {error && (
+                <div id="auth-feedback" className="sl-feedback sl-feedback--error" role="alert">
+                  <span>{error}</span>
+                  {verificationNeeded && !isRegister && (
+                    <button type="button" disabled={loading || !form.email} onClick={handleResendVerification}>
+                      {loading ? "Sending…" : "Resend verification email"}
+                    </button>
+                  )}
+                </div>
+              )}
 
-            <div style={{ color: "#597161", fontSize: 14 }}>
-              {isRegister ? "Already have an account? " : "Need an account? "}
-              <Link className="secondary-link" to={isRegister ? "/login" : "/register"}>
-                {isRegister ? "Sign in" : "Create one"}
-              </Link>
-            </div>
-          </form>
+              <button className="sl-auth-submit" type="submit" disabled={loading} aria-busy={loading}>
+                <span>{loading ? (isRegister ? "Creating account…" : "Signing in…") : isRegister ? "Create account" : "Sign in"}</span>
+                {!loading && <ArrowRight size={17} aria-hidden="true" />}
+              </button>
+            </form>
+
+            <p className="sl-auth-legal">By continuing, you agree to use Supply Link in line with your business and customer responsibilities.</p>
+          </section>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
