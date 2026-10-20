@@ -13,6 +13,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchDashboardSummary } from "../services/api";
 import StatusBadge from "../components/ui/StatusBadge";
+import "./DashboardPremium.css";
 
 const DashboardSalesChart = lazy(() => import("../components/dashboard/DashboardSalesChart"));
 
@@ -41,7 +42,7 @@ const surface = "border border-line bg-surface";
 
 function MetricCard({ title, value, detail, icon: Icon, href, loading }) {
   const content = (
-    <div className={`${surface} flex min-h-36 min-w-0 flex-col justify-between p-4 transition-colors hover:border-line-strong sm:p-5`}>
+    <div className={`${surface} dashboard-metric flex min-h-36 min-w-0 flex-col justify-between p-4 transition-colors hover:border-line-strong sm:p-5`}>
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs font-medium text-muted">{title}</span>
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[5px] border border-line bg-paper text-ink">
@@ -122,16 +123,16 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] min-w-0 space-y-7 sm:space-y-9">
-      <header className="flex min-w-0 flex-col justify-between gap-5 border-b border-line pb-6 sm:flex-row sm:items-end">
+    <div className="dashboard-page mx-auto w-full max-w-[1440px] min-w-0 space-y-7 sm:space-y-9">
+      <header className="dashboard-cover flex min-w-0 flex-col justify-between gap-5 border-b border-line pb-6 sm:flex-row sm:items-end">
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">Seller workspace · Overview</p>
           <h1 className="mt-2 break-words font-serif text-3xl font-medium tracking-tight text-ink sm:text-4xl">
             {summary.businessName || "Store overview"}
           </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">A clear view of your orders, catalog, and recent store activity.</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">Your business, in focus. Review sales, stay ahead of stock, and keep orders moving.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="dashboard-cover-actions flex flex-wrap gap-2">
           <Link to="/products" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[5px] border border-line-strong bg-surface px-3.5 text-xs font-semibold text-ink transition hover:bg-paper focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
             <Package size={15} /> Manage products
           </Link>
@@ -139,6 +140,14 @@ export default function Dashboard() {
             <ShoppingBag size={15} /> View orders <ArrowRight size={14} />
           </Link>
         </div>
+        <aside className="dashboard-sales-highlight" aria-label="Sales summary">
+          <p className="dashboard-sales-label">Recognized sales · all time</p>
+          {loading ? <div className="mt-2 h-9 w-36 animate-pulse bg-white/10" aria-hidden="true" /> : <p className="dashboard-sales-total">{formatMoney(summary.totalSales)}</p>}
+          <div className="dashboard-sales-period">
+            <span>Last seven days</span>
+            {loading ? <span className="h-4 w-20 animate-pulse bg-white/10" aria-hidden="true" /> : <strong>{formatMoney(sevenDaySales)}</strong>}
+          </div>
+        </aside>
       </header>
 
       {loadError ? (
@@ -156,7 +165,7 @@ export default function Dashboard() {
         </section>
       ) : (
         <>
-          <section aria-label="Store metrics" className="grid min-w-0 grid-cols-1 gap-3 min-[360px]:grid-cols-2 xl:grid-cols-4">
+          <section aria-label="Store metrics" className="dashboard-metrics grid min-w-0 grid-cols-1 gap-3 min-[360px]:grid-cols-2 xl:grid-cols-4">
             <MetricCard title="Gross sales" value={formatMoney(summary.totalSales)} detail="Recognized order revenue · all time" icon={TrendingUp} loading={loading} />
             <MetricCard title="Orders" value={summary.totalOrders.toLocaleString("en-IN")} detail="All storefront orders" icon={ShoppingBag} href="/orders" loading={loading} />
             <MetricCard title="Customers" value={summary.customerCount.toLocaleString("en-IN")} detail="Customers with an order email" icon={Users} href="/customers" loading={loading} />

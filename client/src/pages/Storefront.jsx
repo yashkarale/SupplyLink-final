@@ -862,7 +862,7 @@ export default function Storefront() {
         </AnimatePresence>
       </header>
       {cartNotice && (
-        <div role="status" aria-live="polite" className="fixed bottom-5 left-4 right-4 z-50 mx-auto flex max-w-md items-center justify-between gap-3 rounded-2xl bg-[#0E1118] px-4 py-3.5 text-sm font-semibold text-white shadow-xl">
+        <div role="status" aria-live="polite" className="fixed bottom-5 left-4 right-4 z-50 mx-auto flex max-w-md items-center justify-between gap-3 rounded-[5px] border border-[#3b372f] bg-[#1c1a17] px-4 py-3.5 text-sm font-semibold text-white shadow-xl">
           <span className="min-w-0 truncate">{cartNotice}</span>
           <button
             type="button"
@@ -878,10 +878,10 @@ export default function Storefront() {
       )}
       <main>
         <section className="mx-auto max-w-7xl px-4 pb-10 pt-5 sm:px-6 sm:pb-16 sm:pt-8 lg:px-8">
-          <div className="overflow-hidden border-y border-[#E2DCCF] bg-[#FFFDF9]">
+          <div className="storefront-hero-frame overflow-hidden border-y border-[#E2DCCF] bg-[#FFFDF9]">
             <div className="relative grid items-center gap-8 px-5 py-9 sm:px-10 sm:py-12 lg:grid-cols-[1.05fr_0.95fr] lg:px-14 lg:py-14">
                 <motion.div
-                  className="relative z-10"
+                  className="storefront-hero-copy relative z-10"
                   initial={reduceMotion ? false : { opacity: 0, y: 14 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: reduceMotion ? 0 : 0.45, ease: [0.22, 1, 0.36, 1] }}
@@ -924,7 +924,7 @@ export default function Storefront() {
                   </span>
                 </div>
                 </motion.div>
-              <div className="relative mx-auto w-full max-w-md border-l border-[#E2DCCF] pl-4 sm:pl-6 lg:ml-auto">
+              <div className="storefront-preview relative mx-auto w-full max-w-md border-l border-[#E2DCCF] pl-4 sm:pl-6 lg:ml-auto">
                 <div className="absolute -right-1 top-4 z-10 border border-[#E2DCCF] bg-[#FFFDF9] px-3 py-2 sm:right-1 sm:top-6">
                   <div className="flex items-center gap-2 text-xs font-bold text-[#171B24]">
                     <span className="grid h-7 w-7 place-items-center rounded-[4px] bg-[#F1EDE4]">
@@ -1019,20 +1019,20 @@ export default function Storefront() {
             </div>
           </div>
           {!store.paymentQrUrl && (
-            <div role="status" className="mt-5 flex items-start gap-3 rounded-2xl border border-[#F59E0B] bg-[#FFFBEB] px-4 py-4 text-sm text-[#92400E]">
+            <div role="status" className="store-payment-notice mt-5 flex items-start gap-3 border px-4 py-3.5 text-sm leading-relaxed">
               <ShieldCheck size={18} className="mt-0.5 shrink-0" />
               <p>This seller has not completed payment setup. Product browsing is available, but checkout is temporarily unavailable.</p>
             </div>
           )}
         </section>
-        <section className="mx-auto grid max-w-7xl grid-cols-2 gap-3 px-4 pb-12 sm:grid-cols-4 sm:gap-4 sm:px-6 lg:px-8">
+        <section className="storefront-stats mx-auto grid max-w-7xl grid-cols-2 gap-3 px-4 pb-12 sm:grid-cols-4 sm:gap-4 sm:px-6 lg:px-8">
           {[
             { icon: ShoppingBag, value: products.length, label: "Listed products" },
             { icon: Package, value: products.filter((item) => item.stock > 0).length, label: "Available now" },
             { icon: Star, value: categories.length, label: "Categories" },
             { icon: MessageCircle, value: contactAvailable ? "Ready" : "Unavailable", label: "Seller contact" },
           ].map(({ icon: Icon, value, label }) => (
-            <div key={label} className="rounded-2xl border border-[#e8e9df] bg-white p-4 sm:rounded-[22px] sm:p-5">
+            <div key={label} className="storefront-stat-card rounded-2xl border border-[#e8e9df] bg-white p-4 sm:rounded-[22px] sm:p-5">
               <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#F1EDE4] text-[#4A4F5C]">
                 <Icon size={17} />
               </div>
@@ -1059,7 +1059,7 @@ export default function Storefront() {
               {filteredProducts.length} of {products.length} products
             </div>
           </div>
-          <div className="mt-7 rounded-[24px] border border-[#E6E2D8] bg-white p-3 sm:p-4">
+          <div className="storefront-collection-tools mt-7 rounded-[24px] border border-[#E6E2D8] bg-white p-3 sm:p-4">
             <div className="flex flex-col gap-3 lg:flex-row">
               <label className="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-[#E6E2D8] bg-[#F5F3ED] px-4 py-3 focus-within:border-[#171B24]">
                 <Search size={17} className="shrink-0 text-[#4A4F5C]" />
