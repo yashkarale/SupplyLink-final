@@ -159,6 +159,9 @@ describe('auth routes', () => {
       const sellerResponse = await fetch(`http://127.0.0.1:${port}/api/sellers/me`);
       expect(sellerResponse.status).toBe(401);
 
+      const customerDirectoryResponse = await fetch(`http://127.0.0.1:${port}/api/sellers/customers`);
+      expect(customerDirectoryResponse.status).toBe(401);
+
       const productsResponse = await fetch(`http://127.0.0.1:${port}/api/products/`);
       expect(productsResponse.status).toBe(401);
 

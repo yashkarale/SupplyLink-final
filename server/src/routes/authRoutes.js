@@ -6,6 +6,7 @@ import {
   getMe,
   verifyEmail,
   resendVerificationEmail,
+  logout,
 } from "../controllers/authController.js";
 import rateLimit from "express-rate-limit";
 import { protect } from "../middleware/authMiddleware.js";
@@ -31,5 +32,6 @@ router.post("/verify-email", verifyEmail);
 router.post("/resend-verification", rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false }), resendVerificationEmail);
 router.post("/login", loginLimiter, login);
 router.get("/me", protect, getMe);
+router.post("/logout", protect, logout);
 
 export default router;

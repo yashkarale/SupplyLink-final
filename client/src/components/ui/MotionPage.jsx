@@ -5,21 +5,24 @@ import { useLocation } from "react-router-dom";
 const pageVariants = {
   initial: {
     opacity: 0,
-    y: 10,
+    y: 8,
+    filter: "blur(2px)",
   },
   animate: {
     opacity: 1,
     y: 0,
+    filter: "blur(0px)",
   },
   exit: {
     opacity: 0,
-    y: -6,
+    y: -4,
+    filter: "blur(1px)",
   },
 };
 
 const pageTransition = {
-  duration: 0.22,
-  ease: "easeOut",
+  duration: 0.28,
+  ease: [0.22, 1, 0.36, 1],
 };
 
 export function MotionPage({ children }) {

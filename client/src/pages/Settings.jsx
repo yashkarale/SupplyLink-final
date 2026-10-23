@@ -3,7 +3,7 @@ import { useNavigate, useOutletContext } from "react-router-dom";
 import { Check, ExternalLink, LogOut, QrCode, ShieldCheck, Store, Upload, UserRound } from "lucide-react";
 import PageHeader from "../components/ui/PageHeader";
 import Button from "../components/ui/Button";
-import { getSellerProfile, updateSellerStoreSettings, uploadSellerPaymentQr } from "../services/api";
+import { getSellerProfile, revokeCurrentSession, setAuthToken, updateSellerStoreSettings, uploadSellerPaymentQr } from "../services/api";
 import { getStoreUrl } from "../utils/slugify";
 
 const fieldClass = "mt-1.5 w-full min-w-0 border border-[#e2dccf] bg-[#fffdf9] px-3 py-2.5 text-sm text-[#1c1a17] outline-none transition-colors placeholder:text-[#8b8377] focus-visible:border-[#d98a1f] focus-visible:ring-2 focus-visible:ring-[#d98a1f]/25";
@@ -90,16 +90,24 @@ export default function Settings() {
     } finally { setQrSaving(false); event.target.value = ""; }
   };
 
-  const logout = () => {
+  const logout = async () => {
     if (dirty && !window.confirm("You have unsaved store changes. Sign out and discard them?")) return;
-    localStorage.removeItem("supplylink_token");
+    try {
+      await revokeCurrentSession();
+    } catch (logoutError) {
+      if (logoutError?.response?.status !== 401) {
+        setError("We could not confirm server sign-out. Check your connection and try again; this session is still active.");
+        return;
+      }
+    }
+    setAuthToken(null);
     navigate("/login", { replace: true });
   };
 
   const storeUrl = getStoreUrl(profile?.storeSlug);
   const navItems = [{ id: "store-profile", label: "Store profile", Icon: Store }, { id: "account", label: "Account", Icon: UserRound }, { id: "session", label: "Session", Icon: ShieldCheck }];
 
-  return <div className="space-y-6">
+  return <div className="settings-page space-y-6">
     <PageHeader title="Settings" description="Manage the public details and seller account connected to your store." theme={theme} />
     {loading ? <div className={`${panelClass} text-sm ${muted}`} role="status">Loading current settings…</div>
       : error && !profile ? <div className={`${panelClass} flex flex-wrap items-center justify-between gap-3`}><p role="alert" className="text-sm text-[#8b332d]">{error}</p><button type="button" onClick={() => window.location.reload()} className="text-sm font-semibold underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d98a1f]">Retry</button></div>
@@ -109,7 +117,7 @@ export default function Settings() {
           </nav>
 
           <div className="min-w-0 space-y-5">
-            <form id="store-profile" onSubmit={updateProfile} className={panelClass}>
+            <form id="store-profile" onSubmit={updateProfile} className={`${panelClass} settings-panel`}>
               <div className="mb-5"><h2 className="font-[Fraunces] text-xl">Store profile</h2><p className={`mt-1 text-sm ${muted}`}>These details appear on your public storefront.</p></div>
               <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
                 <div><label className={labelClass} htmlFor="business-name">Business name <span aria-hidden="true">*</span></label><input id="business-name" required maxLength={120} value={profile?.businessName || ""} onChange={(e) => change("businessName", e.target.value)} className={fieldClass} autoComplete="organization" /><p className={`mt-1 text-xs ${muted}`}>Up to 120 characters.</p></div>
@@ -135,9 +143,9 @@ export default function Settings() {
               {error && <p role="alert" className="mt-3 text-sm text-[#8b332d]">{error}</p>}{saved && <p role="status" className="mt-3 flex items-center gap-1.5 text-sm text-[#3d5d2b]"><Check size={15} />Store profile saved.</p>}
             </form>
 
-            <section id="account" className={panelClass}><h2 className="font-[Fraunces] text-xl">Account</h2><p className={`mt-1 text-sm ${muted}`}>Your registered sign-in identity.</p><div className="mt-4 max-w-lg"><label className={labelClass} htmlFor="account-email">Registered email</label><input id="account-email" type="email" value={profile?.email || ""} readOnly className={`${fieldClass} bg-[#f7f4ee]`} /></div></section>
+            <section id="account" className={`${panelClass} settings-panel`}><h2 className="font-[Fraunces] text-xl">Account</h2><p className={`mt-1 text-sm ${muted}`}>Your registered sign-in identity.</p><div className="mt-4 max-w-lg"><label className={labelClass} htmlFor="account-email">Registered email</label><input id="account-email" type="email" value={profile?.email || ""} readOnly className={`${fieldClass} bg-[#f7f4ee]`} /></div></section>
 
-            <section id="session" className={panelClass}><h2 className="font-[Fraunces] text-xl">Security & session</h2><div className="mt-3 flex items-start gap-3 border border-[#e2dccf] bg-[#f7f4ee] p-3"><ShieldCheck size={18} aria-hidden="true" className="mt-0.5 shrink-0 text-[#6f685d]" /><p className={`text-sm leading-relaxed ${muted}`}>Your seller workspace uses the current authenticated session. Sign out here to end this session on this device.</p></div><button type="button" onClick={logout} className="mt-4 inline-flex min-h-10 items-center gap-2 border border-[#e2dccf] bg-[#fffdf9] px-3 text-sm font-semibold text-[#1c1a17] transition-colors hover:bg-[#f7f4ee] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d98a1f]"><LogOut size={15} aria-hidden="true" />Sign out</button></section>
+            <section id="session" className={`${panelClass} settings-panel`}><h2 className="font-[Fraunces] text-xl">Security & session</h2><div className="mt-3 flex items-start gap-3 border border-[#e2dccf] bg-[#f7f4ee] p-3"><ShieldCheck size={18} aria-hidden="true" className="mt-0.5 shrink-0 text-[#6f685d]" /><p className={`text-sm leading-relaxed ${muted}`}>Your seller workspace uses the current authenticated session. Sign out here to end this session on this device.</p></div><button type="button" onClick={logout} className="mt-4 inline-flex min-h-10 items-center gap-2 border border-[#e2dccf] bg-[#fffdf9] px-3 text-sm font-semibold text-[#1c1a17] transition-colors hover:bg-[#f7f4ee] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d98a1f]"><LogOut size={15} aria-hidden="true" />Sign out</button></section>
           </div>
         </div>}
   </div>;

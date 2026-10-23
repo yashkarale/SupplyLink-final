@@ -166,6 +166,16 @@
   box-shadow: var(--shadow-subtle);
 }
 
+.sl-auth-intro { animation: sl-auth-enter 460ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.sl-auth-panel { animation: sl-auth-enter 520ms 80ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.sl-onboarding-intro { animation: sl-auth-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.sl-onboarding-panel { animation: sl-auth-enter 480ms 70ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes sl-auth-enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .sl-auth-panel { padding: clamp(1.25rem, 4vw, 2.5rem); }
 .sl-auth-panel-heading h2,
 .sl-onboarding-panel-heading h2,
@@ -481,6 +491,13 @@
 .sl-state-message { display: flex; align-items: center; gap: 0.75rem; color: var(--muted); font-size: 0.875rem; }
 .sl-onboarding-state .sl-verify-panel { width: min(100%, 470px); }
 .sl-onboarding-state .sl-auth-submit { margin-top: 1.5rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sl-auth-intro,
+  .sl-auth-panel,
+  .sl-onboarding-intro,
+  .sl-onboarding-panel { animation: none; }
+}
 
 @media (max-width: 760px) {
   .sl-auth-layout { grid-template-columns: minmax(0, 1fr); gap: 1.25rem; padding-top: 0.5rem; }

@@ -6,16 +6,11 @@ import { normalizeStoreSlug } from "../utils/storeSlug.js";
 import { storeEvents } from "../utils/storeEvents.js";
 import { buildWhatsAppUrl, normalizeE164 } from "../utils/whatsapp.js";
 import { getProductLimitForSeller } from "../utils/planEntitlements.js";
+import { aggregateCustomers, isRecognizedRevenueOrder, summarizeOrderValues } from "../utils/customerMetrics.js";
 import { destroyCloudinaryImage, inspectUploadedImage, uploadImageToCloudinary } from "../services/mediaStorage.js";
 import crypto from "node:crypto";
 
 const formatDayLabel = (date) => date.toLocaleDateString("en-IN", { weekday: "short" });
-
-export const isRecognizedRevenueOrder = (order) => {
-  if (["CANCELLED", "RETURNED"].includes(String(order?.orderStatus || "").toUpperCase())) return false;
-  return order?.paymentStatus === "VERIFIED"
-    || (order?.paymentMethod === "COD" && order?.orderStatus === "DELIVERED");
-};
 
 const normalizeFaqs = (value) => {
   const rawFaqs = Array.isArray(value) ? value : typeof value === "string" ? value.split(/\n+/) : [];
@@ -286,7 +281,8 @@ export const getSellerDashboard = async (req, res) => {
     ]);
 
     const revenueOrders = orders.filter(isRecognizedRevenueOrder);
-    const totalSales = revenueOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
+    const orderValues = summarizeOrderValues(orders);
+    const totalSales = orderValues.recognizedSales;
     const totalOrders = orders.length;
     const averageOrderValue = revenueOrders.length > 0 ? totalSales / revenueOrders.length : 0;
     const lowStockCount = products.filter((product) => Number(product.stock || 0) > 0 && Number(product.stock || 0) <= Number(product.lowStockThreshold || 5)).length;
@@ -311,12 +307,7 @@ export const getSellerDashboard = async (req, res) => {
       };
     });
 
-    const customerEmails = new Set(
-      orders.flatMap((order) => {
-        const email = order?.customer?.email;
-        return email ? [String(email).toLowerCase()] : [];
-      })
-    );
+    const customers = aggregateCustomers(orders);
 
     const recentOrders = orders.slice(0, 5).map((order) => ({
       id: order.orderReference || order._id,
@@ -339,12 +330,13 @@ export const getSellerDashboard = async (req, res) => {
       analytics: {
         businessName: seller?.businessName || "Your Store",
         totalSales,
+        orderValues,
         totalOrders,
         totalProducts: products.length,
         averageOrderValue,
         lowStockCount,
         outOfStockCount,
-        customerCount: customerEmails.size,
+        customerCount: customers.length,
         salesSeries,
         recentOrders,
       },
@@ -355,6 +347,17 @@ export const getSellerDashboard = async (req, res) => {
       success: false,
       message: "Unable to retrieve dashboard analytics",
     });
+  }
+};
+
+export const getSellerCustomers = async (req, res) => {
+  try {
+    const orders = await Order.find({ sellerId: req.user.userId }).sort({ createdAt: -1 }).lean();
+    const customers = aggregateCustomers(orders);
+    return res.status(200).json({ success: true, customers });
+  } catch (error) {
+    console.error("Get seller customers error:", error.message);
+    return res.status(500).json({ success: false, message: "Unable to retrieve customer records" });
   }
 };
 

@@ -125,17 +125,23 @@ export const createNotification = async ({
   message,
   data = null,
   link = "",
+  session,
 }) => {
   try {
-    await Notification.create({
+    const notification = {
       sellerId,
       type,
       title,
       message,
       data,
       link,
-    });
+    };
+    if (session) {
+      return await Notification.create([notification], { session });
+    }
+    return await Notification.create(notification);
   } catch (error) {
     console.error("Create notification error:", error.message);
+    if (session) throw error;
   }
 };

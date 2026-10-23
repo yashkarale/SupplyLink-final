@@ -24,6 +24,7 @@ export default function Products() {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [updatingProductId, setUpdatingProductId] = useState("");
   const [form, setForm] = useState({ name: "", category: "Apparel", price: "", stock: "" });
   const [error, setError] = useState("");
   const [successNotice, setSuccessNotice] = useState("");
@@ -106,6 +107,33 @@ export default function Products() {
     } catch (err) { setError(err?.response?.data?.message || err?.message || "Unable to update inventory."); }
   };
 
+  const toggleProductArchive = async (product) => {
+    const nextStatus = product.status === "published" ? "archived" : "published";
+    const activeCountDelta = Number(nextStatus !== "archived") - Number(product.status !== "archived");
+    setUpdatingProductId(product.id);
+    setError("");
+    setSuccessNotice("");
+    try {
+      const response = await updateProduct(product.id, { status: nextStatus });
+      if (!response?.product) throw new Error("The server did not return the updated product.");
+      const updated = normalizeProduct(response.product);
+      setProducts((current) => current.map((item) => item.id === product.id ? updated : item));
+      setProductCapacity((current) => current?.limit == null ? current : {
+        ...current,
+        count: Math.max(0, current.count + activeCountDelta),
+      });
+      setSuccessNotice(nextStatus === "archived"
+        ? `${product.name} was archived and removed from the public storefront.`
+        : product.status === "draft"
+          ? `${product.name} was published to the public storefront.`
+          : `${product.name} was restored to the public storefront.`);
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || "Unable to update product availability.");
+    } finally {
+      setUpdatingProductId("");
+    }
+  };
+
   return <main className="min-w-0 space-y-5 text-[var(--ink)] sm:space-y-6">
     <PageHeader title="Products" description="Your catalog, pricing, and availability in one place." action="Add product" onAction={startCreate} theme={theme} />
     {productCapacity?.limit != null && <p className="rounded-[var(--radius-card)] border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">Free plan: <strong className="text-[var(--ink)]">{productCapacity.count} of {productCapacity.limit}</strong> active products used. Upgrade under Billing for unlimited listings.</p>}
@@ -125,8 +153,8 @@ export default function Products() {
       {loading ? <div className="space-y-4 p-5"><SkeletonLoader height={24} width="25%" theme={theme}/><SkeletonLoader height={92} width="100%" theme={theme}/><SkeletonLoader height={92} width="100%" theme={theme}/></div>
         : filtered.length === 0 ? <EmptyState title={products.length ? "No matching products" : "Your catalog is empty"} description={products.length ? "Try a different name, category, or product ID." : "Add a product to begin building your catalog."} actionLabel={products.length ? undefined : "Add product"} onAction={products.length ? undefined : startCreate}/>
         : <>
-          <div className="hidden md:block"><table className="w-full table-fixed text-left"><thead className="bg-[var(--paper)] text-[10px] uppercase tracking-wide text-[var(--muted)]"><tr>{["Product","Category","Price","Stock","Sold","Status",""].map((h,i)=><th key={`${h}-${i}`} className="px-4 py-3 font-semibold">{h}</th>)}</tr></thead><tbody className="divide-y divide-[var(--line)]">{filtered.map((p)=><tr key={p.id} className="transition-colors hover:bg-[var(--paper)]"><td className="px-4 py-3"><ProductIdentity product={p}/></td><td className="truncate px-4 py-3 text-sm text-[var(--muted)]">{p.category}</td><td className="px-4 py-3 text-sm font-medium">{formatCurrency(p.price)}</td><td className="px-4 py-3"><StockStepper product={p} onChange={updateStock}/></td><td className="px-4 py-3 text-sm text-[var(--muted)]">{p.sold}</td><td className="px-4 py-3"><ProductState product={p}/></td><td className="px-4 py-3 text-right"><button type="button" onClick={()=>startEdit(p)} className="min-h-10 rounded-[var(--radius-control)] px-3 text-sm font-semibold text-[var(--ink)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]">Edit</button></td></tr>)}</tbody></table></div>
-          <div className="divide-y divide-[var(--line)] md:hidden">{filtered.map((p)=><article key={p.id} className="min-w-0 space-y-3 p-4"><div className="flex min-w-0 items-start justify-between gap-3"><div className="min-w-0"><ProductIdentity product={p}/><p className="mt-1 truncate text-xs text-[var(--muted)]">{p.category} · {p.id}</p></div><button type="button" onClick={()=>startEdit(p)} className="min-h-10 shrink-0 rounded-[var(--radius-control)] border border-[var(--line)] px-3 text-sm font-semibold hover:bg-[var(--paper)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]">Edit</button></div><div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] pt-3"><div><p className="text-xs text-[var(--muted)]">Price</p><p className="font-semibold">{formatCurrency(p.price)}</p></div><div><p className="text-xs text-[var(--muted)]">Units sold</p><p className="font-medium">{p.sold}</p></div><StockStepper product={p} onChange={updateStock}/><ProductState product={p}/></div></article>)}</div>
+          <div className="hidden md:block"><table className="w-full table-fixed text-left"><thead className="bg-[var(--paper)] text-[10px] uppercase tracking-wide text-[var(--muted)]"><tr>{["Product","Category","Price","Stock","Sold","Status","Actions"].map((h,i)=><th key={`${h}-${i}`} className="px-4 py-3 font-semibold">{h}</th>)}</tr></thead><tbody className="divide-y divide-[var(--line)]">{filtered.map((p)=><tr key={p.id} className="transition-colors hover:bg-[var(--paper)]"><td className="px-4 py-3"><ProductIdentity product={p}/></td><td className="truncate px-4 py-3 text-sm text-[var(--muted)]">{p.category}</td><td className="px-4 py-3 text-sm font-medium">{formatCurrency(p.price)}</td><td className="px-4 py-3"><StockStepper product={p} onChange={updateStock}/></td><td className="px-4 py-3 text-sm text-[var(--muted)]">{p.sold}</td><td className="px-4 py-3"><ProductState product={p}/></td><td className="px-4 py-3 text-right"><div className="flex flex-wrap justify-end gap-1"><button type="button" onClick={()=>startEdit(p)} className="min-h-10 rounded-[var(--radius-control)] px-3 text-sm font-semibold text-[var(--ink)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]">Edit</button><button type="button" disabled={updatingProductId===p.id} onClick={()=>toggleProductArchive(p)} className="min-h-10 rounded-[var(--radius-control)] px-3 text-sm font-semibold text-[var(--muted)] underline-offset-4 hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]">{updatingProductId===p.id?"Saving…":p.status==="archived"?"Restore":p.status==="draft"?"Publish":"Archive"}</button></div></td></tr>)}</tbody></table></div>
+          <div className="divide-y divide-[var(--line)] md:hidden">{filtered.map((p)=><article key={p.id} className="min-w-0 space-y-3 p-4"><div className="flex min-w-0 items-start justify-between gap-3"><div className="min-w-0"><ProductIdentity product={p}/><p className="mt-1 truncate text-xs text-[var(--muted)]">{p.category} · {p.id}</p></div><div className="flex shrink-0 gap-1"><button type="button" onClick={()=>startEdit(p)} className="min-h-10 rounded-[var(--radius-control)] border border-[var(--line)] px-3 text-sm font-semibold hover:bg-[var(--paper)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]">Edit</button><button type="button" disabled={updatingProductId===p.id} onClick={()=>toggleProductArchive(p)} className="min-h-10 rounded-[var(--radius-control)] border border-[var(--line)] px-3 text-sm font-semibold hover:bg-[var(--paper)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]">{updatingProductId===p.id?"Saving…":p.status==="archived"?"Restore":p.status==="draft"?"Publish":"Archive"}</button></div></div><div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] pt-3"><div><p className="text-xs text-[var(--muted)]">Price</p><p className="font-semibold">{formatCurrency(p.price)}</p></div><div><p className="text-xs text-[var(--muted)]">Units sold</p><p className="font-medium">{p.sold}</p></div><StockStepper product={p} onChange={updateStock}/><ProductState product={p}/></div></article>)}</div>
         </>}
     </section>
     <Modal isOpen={showForm} onClose={closeForm} title={editingId ? "Edit product" : "Add product"} maxWidth="max-w-2xl">

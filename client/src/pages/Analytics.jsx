@@ -40,15 +40,20 @@ export default function Analytics() {
   })), [analytics]);
 
   const metrics = [
-    { label: "Recognized revenue", value: currency(analytics?.totalSales), detail: "Verified payments and delivered COD · all time", Icon: IndianRupee },
+    { label: "Recognized sales value", value: currency(analytics?.totalSales), detail: "Verified payments and delivered COD · excludes cancelled and returned orders", Icon: IndianRupee },
+    { label: "Gross order value", value: currency(analytics?.orderValues?.grossOrderValue), detail: "All recorded orders, including unpaid and cancelled orders", Icon: IndianRupee },
+    { label: "Pending payment value", value: currency(analytics?.orderValues?.pendingPaymentValue), detail: "Pending payments excluding cancelled, returned, and delivered COD orders", Icon: IndianRupee },
+    { label: "Failed payment value", value: currency(analytics?.orderValues?.failedPaymentValue), detail: "Recorded order value with a failed payment state", Icon: IndianRupee },
+    { label: "Cancelled order value", value: currency(analytics?.orderValues?.cancelledOrderValue), detail: "Recorded value of cancelled orders; excluded from recognized sales", Icon: IndianRupee },
+    { label: "Refunds", value: analytics?.orderValues?.refundTrackingSupported ? "Tracked" : "Unavailable", detail: "Buyer order refunds and partial refunds are not stored", Icon: IndianRupee },
     { label: "Orders", value: number(analytics?.totalOrders).toLocaleString("en-IN"), detail: "All recorded order statuses", Icon: ShoppingBag },
-    { label: "Average recognized order", value: currency(analytics?.averageOrderValue), detail: "Recognized revenue orders only", Icon: Activity },
-    { label: "Recorded customers", value: number(analytics?.customerCount).toLocaleString("en-IN"), detail: "Unique customer email addresses on orders", Icon: Users },
+    { label: "Average recognized order", value: currency(analytics?.averageOrderValue), detail: "Recognized sales divided by recognized orders", Icon: Activity },
+    { label: "Recorded customers", value: number(analytics?.customerCount).toLocaleString("en-IN"), detail: "Seller-scoped contact groups from orders", Icon: Users },
     { label: "Products", value: number(analytics?.totalProducts).toLocaleString("en-IN"), detail: "Products in your catalog", Icon: Boxes },
   ];
 
   return <div className="space-y-6">
-    <PageHeader title="Analytics" description="A factual snapshot of recorded store activity. Revenue reflects recognized orders; it is not a count of every order placed." theme={theme} />
+    <PageHeader title="Analytics" description="Recognized sales use verified payments and delivered COD, excluding cancelled and returned orders. Gross order value includes all recorded order states. Values use total order amounts, including shipping and discounts; seller fees and buyer refunds are not recorded here." theme={theme} />
 
     {error && <div role="alert" className={`flex flex-wrap items-center justify-between gap-3 border p-4 text-sm ${paper}`}>
       <span className={muted}>{error}</span><button type="button" onClick={() => load()} className="font-semibold text-[#8f550b] underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d98a1f]">Retry</button>

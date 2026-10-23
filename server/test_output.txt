@@ -1,0 +1,63 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90mD:/PROJECTS/supplylink/server[39m
+
+ [32m✓[39m tests/emailVerification.test.js[2m > [22memail verification tokens[2m > [22mcreates a high-entropy token and stores only its one-way hash[32m 8[2mms[22m[39m
+ [32m✓[39m tests/emailVerification.test.js[2m > [22memail verification tokens[2m > [22mrejects malformed tokens[32m 1[2mms[22m[39m
+ [32m✓[39m tests/storeSlug.test.js[2m > [22mnormalizeStoreSlug[2m > [22mcanonicalizes encoded route values after Express decodes them[32m 4[2mms[22m[39m
+ [32m✓[39m tests/storeSlug.test.js[2m > [22mnormalizeStoreSlug[2m > [22mnormalizes case, accents, punctuation, and repeated separators[32m 1[2mms[22m[39m
+ [32m✓[39m tests/storeSlug.test.js[2m > [22mnormalizeStoreSlug[2m > [22mbounds slugs to the seller model limit[32m 1[2mms[22m[39m
+ [32m✓[39m tests/storageUsage.test.js[2m > [22morder storage guard[2m > [22mcounts document and index bytes toward the database limit[32m 3[2mms[22m[39m
+ [32m✓[39m tests/storageUsage.test.js[2m > [22morder storage guard[2m > [22muses a conservative Free-cluster default and validates configuration[32m 2[2mms[22m[39m
+ [32m✓[39m tests/storageUsage.test.js[2m > [22morder storage guard[2m > [22mreports measured order document size without exposing database credentials[32m 1[2mms[22m[39m
+ [32m✓[39m tests/whatsapp.test.js[2m > [22mseller WhatsApp destinations[2m > [22mnormalizes international input and supports valid Indian mobile numbers[32m 3[2mms[22m[39m
+ [32m✓[39m tests/whatsapp.test.js[2m > [22mseller WhatsApp destinations[2m > [22mtargets only the explicitly configured WhatsApp number[32m 1[2mms[22m[39m
+ [32m✓[39m tests/whatsapp.test.js[2m > [22mseller WhatsApp destinations[2m > [22mencodes prefilled inquiry messages and uses supplied server catalog values[32m 1[2mms[22m[39m
+ [32m✓[39m tests/whatsapp.test.js[2m > [22mseller WhatsApp destinations[2m > [22madds the order reference and private screenshot link after a QR order[32m 1[2mms[22m[39m
+ [32m✓[39m tests/emailWebhook.test.js[2m > [22mResend webhook signature verification[2m > [22maccepts an authentic recent signature and rejects altered or stale requests[32m 5[2mms[22m[39m
+ [32m✓[39m tests/mediaStorage.test.js[2m > [22muploaded image validation[2m > [22maccepts a square, adequately sized payment QR[32m 4[2mms[22m[39m
+ [32m✓[39m tests/mediaStorage.test.js[2m > [22muploaded image validation[2m > [22mrejects a non-square or too small payment QR[32m 2[2mms[22m[39m
+ [32m✓[39m tests/mediaStorage.test.js[2m > [22muploaded image validation[2m > [22mrejects MIME spoofing and oversized image files[32m 1[2mms[22m[39m
+ [32m✓[39m tests/mediaStorage.test.js[2m > [22muploaded image validation[2m > [22mrequires payment screenshots to meet the minimum receipt dimensions[32m 1[2mms[22m[39m
+ [32m✓[39m tests/emailService.test.js[2m > [22mtransactional email configuration[2m > [22mvalidates recipients and does not claim success without provider configuration[32m 7[2mms[22m[39m
+ [32m✓[39m tests/emailService.test.js[2m > [22mtransactional email configuration[2m > [22mrequires the email provider and public app URL to send a verification link[32m 1[2mms[22m[39m
+ [32m✓[39m tests/planEntitlements.test.js[2m > [22mproduct plan entitlements[2m > [22mlimits Free and expired paid plans to two non-archived products[32m 3[2mms[22m[39m
+ [32m✓[39m tests/planEntitlements.test.js[2m > [22mproduct plan entitlements[2m > [22mdoes not limit products while a paid plan is active[32m 0[2mms[22m[39m
+ [32m✓[39m tests/planEntitlements.test.js[2m > [22mproduct plan entitlements[2m > [22mtreats legacy paid plan names without an active expiry as Free[32m 0[2mms[22m[39m
+ [32m✓[39m tests/analyticsRevenue.test.js[2m > [22mdashboard recognized revenue[2m > [22mcounts verified payments and delivered COD, but excludes unpaid and cancelled orders[32m 3[2mms[22m[39m
+ [32m✓[39m tests/orderLifecycle.test.js[2m > [22morder lifecycle validation[2m > [22mallows valid order status transitions[32m 2[2mms[22m[39m
+ [32m✓[39m tests/orderLifecycle.test.js[2m > [22morder lifecycle validation[2m > [22mblocks invalid state changes[32m 2[2mms[22m[39m
+ [32m✓[39m tests/orderSecurity.test.js[2m > [22mseller order status security[2m > [22mdoes not allow sellers to mark a payment as verified[32m 5[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Suites 4 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/authRoutes.test.js[2m [ tests/authRoutes.test.js ][22m
+[41m[1m FAIL [22m[49m tests/billing.test.js[2m [ tests/billing.test.js ][22m
+[41m[1m FAIL [22m[49m tests/readiness.test.js[2m [ tests/readiness.test.js ][22m
+[31m[1mAggregateError[22m: oxc transform error[39m
+  Plugin: [35mvite:define[39m
+  File: [36mD:/PROJECTS/supplylink/server/src/controllers/billingController.js[39m
+[90m [2m❯[22m replaceDefine node_modules/vite/dist/node/chunks/node.js:[2m17201:38[22m[39m
+[90m [2m❯[22m TransformPluginContext.handler node_modules/vite/dist/node/chunks/node.js:[2m17189:11[22m[39m
+[90m [2m❯[22m EnvironmentPluginContainer.transform node_modules/vite/dist/node/chunks/node.js:[2m8545:51[22m[39m
+[90m [2m❯[22m loadAndTransform node_modules/vite/dist/node/chunks/node.js:[2m20184:26[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/staging.integration.test.js[2m [ tests/staging.integration.test.js ][22m
+[31m[1mAggregateError[22m: oxc transform error[39m
+  Plugin: [35mvite:define[39m
+  File: [36mD:/PROJECTS/supplylink/server/src/controllers/billingController.js[39m
+[90m [2m❯[22m replaceDefine node_modules/vite/dist/node/chunks/node.js:[2m17201:38[22m[39m
+[90m [2m❯[22m TransformPluginContext.handler node_modules/vite/dist/node/chunks/node.js:[2m17189:11[22m[39m
+[90m [2m❯[22m EnvironmentPluginContainer.transform node_modules/vite/dist/node/chunks/node.js:[2m8545:51[22m[39m
+[90m [2m❯[22m loadAndTransform node_modules/vite/dist/node/chunks/node.js:[2m20184:26[22m[39m
+[90m [2m❯[22m fetchModule node_modules/vite/dist/node/chunks/node.js:[2m36165:15[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m4 failed[39m[22m[2m | [22m[1m[32m11 passed[39m[22m[90m (15)[39m
+[2m      Tests [22m [1m[32m26 passed[39m[22m[90m (26)[39m
+[2m   Start at [22m 11:18:37
+[2m   Duration [22m 1.89s[2m (import 66%, transform 27%, worker 5%, tests 2%)[22m
+

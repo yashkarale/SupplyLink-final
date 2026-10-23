@@ -242,6 +242,42 @@ button {
 .custom-scrollbar::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--muted-soft); }
 
+/* Small, consistent interaction feedback across the seller workspace. */
+.app-shell :where(button:not(:disabled), a[href]) {
+  transition-timing-function: var(--ease-standard);
+}
+
+.app-shell :where(input:not([type="checkbox"]), select, textarea) {
+  transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), background-color var(--motion-fast) var(--ease-standard);
+}
+
+.app-shell :where(button:not(:disabled)):active {
+  transform: translateY(1px);
+}
+
+.app-shell :where(a[href]):focus-visible,
+.app-shell :where(button):focus-visible {
+  outline-offset: 3px;
+}
+
+.app-shell :where(a[href], button:not(:disabled)) svg {
+  transition: transform var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .app-shell :where(a[href]):hover svg { transform: translateX(2px); }
+}
+
+.settings-page [id] { scroll-margin-top: 5.5rem; }
+.settings-panel { animation: sl-settings-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.settings-panel:nth-child(2) { animation-delay: 55ms; }
+.settings-panel:nth-child(3) { animation-delay: 110ms; }
+
+@keyframes sl-settings-enter {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after {

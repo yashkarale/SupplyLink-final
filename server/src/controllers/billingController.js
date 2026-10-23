@@ -106,14 +106,15 @@ const applyCapturedPayment = async ({ orderId, payment, order, session }) => {
       planExpiresAt: entitlementExpiresAt,
     },
   }, { session });
-  createNotification({
+  await createNotification({
     sellerId: checkout.sellerId,
     type: "subscription_activated",
     title: "Subscription activated",
     message: `Your ${plan.displayName || plan.name} plan is now active until ${new Date(entitlementExpiresAt).toLocaleDateString("en-IN")}.`,
     data: { plan: plan.name, amount: plan.amount, expiresAt: entitlementExpiresAt },
     link: `/billing`,
-  }).catch((error) => console.error("Failed to create subscription notification:", error.message));
+    session,
+  });
   return savedPayment;
 };
 
@@ -434,14 +435,15 @@ export const handleRazorpayWebhook = async (req, res) => {
         } else if (payload.event === "payment.failed" && validRazorpayId(payment?.order_id)) {
           const failedCheckout = await SubscriptionCheckout.findOne({ razorpayOrderId: payment.order_id }).session(session);
           if (failedCheckout) {
-            createNotification({
+            await createNotification({
               sellerId: failedCheckout.sellerId,
               type: "payment_failed",
               title: "Subscription payment failed",
               message: `Your Razorpay payment for the ${failedCheckout.plan} plan failed. Your plan may expire if payment is not completed.`,
               data: { orderId: payment.order_id, plan: failedCheckout.plan },
               link: `/billing`,
-            }).catch((error) => console.error("Failed to create payment failure notification:", error.message));
+              session,
+            });
           }
           await SubscriptionCheckout.updateOne(
             { razorpayOrderId: payment.order_id, status: "pending" },

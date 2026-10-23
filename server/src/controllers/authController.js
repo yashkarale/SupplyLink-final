@@ -1,9 +1,11 @@
 
 import bcrypt from "bcrypt";
+import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import { createEmailVerificationToken, hashEmailVerificationToken, isEmailVerificationToken } from "../utils/emailVerification.js";
 import { sendVerificationEmail } from "../services/emailService.js";
 import User from "../models/User.js";
+import AuthSession from "../models/AuthSession.js";
 
 export const register = async (req, res) => {
   try {
@@ -182,17 +184,25 @@ export const login = async (req, res) => {
       });
     }
 
+    const sessionId = crypto.randomUUID();
     const token = jwt.sign(
       {
         userId: user._id.toString(),
         role: user.role,
         emailVerified: true,
+        jti: sessionId,
       },
       process.env.JWT_SECRET,
       {
         expiresIn: process.env.JWT_EXPIRES_IN || "1d"
       }
     );
+    const decodedToken = jwt.decode(token);
+    await AuthSession.create({
+      sessionId,
+      userId: user._id,
+      expiresAt: new Date(decodedToken.exp * 1000),
+    });
 
     return res.status(200).json({
       message: "Login successful",
@@ -210,6 +220,16 @@ export const login = async (req, res) => {
     return res.status(500).json({
       message: "Unable to log in"
     });
+  }
+};
+
+export const logout = async (req, res) => {
+  try {
+    await AuthSession.deleteOne({ sessionId: req.user.sessionId, userId: req.user.userId });
+    return res.status(200).json({ success: true, message: "Session revoked." });
+  } catch (error) {
+    console.error("Logout error:", error.message);
+    return res.status(500).json({ success: false, message: "Unable to revoke this session." });
   }
 };
 

@@ -332,6 +332,17 @@ export const createPublicOrder = async (req, res) => {
           }],
           { session }
         );
+
+        const persistedOrder = createdOrder[0];
+        await createNotification({
+          sellerId: seller.userId,
+          type: "order_created",
+          title: "New order received",
+          message: `Order ${persistedOrder.orderReference} from ${customer.name} for ${formatCurrency(persistedOrder.totalAmount)}`,
+          data: { orderReference: persistedOrder.orderReference, totalAmount: persistedOrder.totalAmount, customerName: customer.name },
+          link: `/orders/${persistedOrder._id}`,
+          session,
+        });
       });
 
       publishStoreEvent(seller.storeSlug, 'catalog.updated');
@@ -362,15 +373,6 @@ export const createPublicOrder = async (req, res) => {
       } catch (emailStatusError) {
         console.error('Order email status could not be recorded:', emailStatusError.message);
       }
-
-      createNotification({
-        sellerId: seller.userId,
-        type: "order_created",
-        title: "New order received",
-        message: `Order ${persistedOrder.orderReference} from ${customer.name} for ${formatCurrency(persistedOrder.totalAmount)}`,
-        data: { orderReference: persistedOrder.orderReference, totalAmount: persistedOrder.totalAmount, customerName: customer.name },
-        link: `/orders/${persistedOrder._id}`,
-      }).catch((error) => console.error("Failed to create order notification:", error.message));
 
       return res.status(201).json({
         success: true,
@@ -628,7 +630,19 @@ export const updateSellerOrderStatus = async (req, res) => {
       }
 
       const previousStatus = order.orderStatus;
+      let cancellationClaimed = false;
       if (nextStatus === 'CANCELLED' && previousStatus !== 'CANCELLED') {
+        const claim = await Order.updateOne(
+          { _id: order._id, sellerId: req.user.userId, orderStatus: { $ne: 'CANCELLED' } },
+          { $set: { orderStatus: 'CANCELLED' } },
+          { session }
+        );
+        if (claim.modifiedCount !== 1) {
+          const alreadyCancelled = new Error('Order is already cancelled.');
+          alreadyCancelled.status = 409;
+          throw alreadyCancelled;
+        }
+        cancellationClaimed = true;
         for (const item of order.items) {
           const result = await Product.updateOne(
             { _id: item.productId, sellerId: req.user.userId },
@@ -641,20 +655,25 @@ export const updateSellerOrderStatus = async (req, res) => {
         }
       }
 
-      order.orderStatus = nextStatus;
+      if (cancellationClaimed) {
+        order.orderStatus = 'CANCELLED';
+      } else {
+        order.orderStatus = nextStatus;
+      }
       if (nextStatus === 'CANCELLED' && order.paymentStatus === 'PENDING') order.paymentStatus = 'FAILED';
       order.statusHistory.push({ from: previousStatus, to: nextStatus, changedAt: new Date() });
       await order.save({ session });
       updatedOrder = order;
 
-      createNotification({
+      await createNotification({
         sellerId: req.user.userId,
         type: "order_status_changed",
         title: "Order status updated",
         message: `Order ${order.orderReference} is now ${nextStatus.toLowerCase()}`,
         data: { orderReference: order.orderReference, orderStatus: nextStatus, previousStatus },
         link: `/orders/${order._id}`,
-      }).catch((error) => console.error("Failed to create order status notification:", error.message));
+        session,
+      });
     });
 
     return res.status(200).json({

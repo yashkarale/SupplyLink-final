@@ -76,8 +76,8 @@ export default function AppSidebar({ open = false, onClose = () => {} }) {
   const navLinkClass = ({ isActive }) =>
     `group relative flex min-h-11 items-center gap-3 rounded-[5px] border px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
       isActive
-        ? "border-line bg-paper font-semibold text-ink"
-        : "border-transparent text-muted hover:border-line hover:bg-paper hover:text-ink"
+        ? "border-[#665d4f] bg-[#332e26] font-semibold text-[#fffdf9]"
+        : "border-transparent text-[#c5bcad] hover:border-[#51483b] hover:bg-[#29251f] hover:text-[#fffdf9]"
     }`;
 
   return (
@@ -96,19 +96,19 @@ export default function AppSidebar({ open = false, onClose = () => {} }) {
         ref={sidebarRef}
         role={open ? "dialog" : undefined}
         aria-modal={open ? "true" : undefined}
-        className={`fixed inset-y-0 left-0 z-50 flex w-[min(280px,calc(100vw-40px))] flex-col border-r border-line bg-surface text-ink shadow-[var(--shadow-subtle)] transition-transform duration-200 motion-reduce:transition-none lg:w-[252px] lg:translate-x-0 lg:shadow-none ${open ? "translate-x-0" : "-translate-x-full"}`}
+        className={`app-sidebar fixed inset-y-0 left-0 z-50 flex w-[min(280px,calc(100vw-40px))] flex-col border-r border-line bg-surface text-ink shadow-[var(--shadow-subtle)] transition-transform duration-200 motion-reduce:transition-none lg:w-[252px] lg:translate-x-0 lg:shadow-none ${open ? "translate-x-0" : "-translate-x-full"}`}
       >
-        <div className="flex h-[72px] shrink-0 items-center justify-between border-b border-line px-5">
+        <div className="flex h-[78px] shrink-0 items-center justify-between border-b border-line px-5">
           <Link to="/dashboard" onClick={onClose} className="group flex min-w-0 items-center gap-3 rounded-[5px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[5px] bg-ink text-accent">
-              <Layers size={19} strokeWidth={2} aria-hidden="true" />
+            <span className="brand-mark grid h-9 w-9 shrink-0 place-items-center rounded-[5px] bg-ink text-accent">
+              <Layers size={19} strokeWidth={1.8} aria-hidden="true" />
             </span>
-            <span className="min-w-0">
+            <span className="brand-copy min-w-0">
               <span className="block font-serif text-lg font-semibold leading-tight tracking-tight">Supply Link</span>
               <span className="mt-0.5 block text-[9px] font-semibold uppercase tracking-[0.16em] text-muted">Seller workspace</span>
             </span>
           </Link>
-          <button type="button" aria-label="Close navigation" onClick={onClose} className="grid h-10 w-10 shrink-0 place-items-center rounded-[5px] text-muted hover:bg-paper hover:text-ink focus-visible:outline-2 focus-visible:outline-accent lg:hidden">
+          <button type="button" aria-label="Close navigation" onClick={onClose} className="sidebar-close grid h-10 w-10 shrink-0 place-items-center rounded-[5px] text-muted hover:bg-paper hover:text-ink focus-visible:outline-2 focus-visible:outline-accent lg:hidden">
             <X size={18} />
           </button>
         </div>

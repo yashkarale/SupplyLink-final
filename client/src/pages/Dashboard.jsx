@@ -166,9 +166,9 @@ export default function Dashboard() {
       ) : (
         <>
           <section aria-label="Store metrics" className="dashboard-metrics grid min-w-0 grid-cols-1 gap-3 min-[360px]:grid-cols-2 xl:grid-cols-4">
-            <MetricCard title="Gross sales" value={formatMoney(summary.totalSales)} detail="Recognized order revenue · all time" icon={TrendingUp} loading={loading} />
+            <MetricCard title="Recognized sales" value={formatMoney(summary.totalSales)} detail="Verified payments and delivered COD · excludes cancelled and returned orders" icon={TrendingUp} loading={loading} />
             <MetricCard title="Orders" value={summary.totalOrders.toLocaleString("en-IN")} detail="All storefront orders" icon={ShoppingBag} href="/orders" loading={loading} />
-            <MetricCard title="Customers" value={summary.customerCount.toLocaleString("en-IN")} detail="Customers with an order email" icon={Users} href="/customers" loading={loading} />
+            <MetricCard title="Customers" value={summary.customerCount.toLocaleString("en-IN")} detail="Seller-scoped contact groups from orders" icon={Users} href="/customers" loading={loading} />
             <MetricCard title="Products" value={summary.totalProducts.toLocaleString("en-IN")} detail={`${summary.lowStockCount} low · ${summary.outOfStockCount} out of stock`} icon={Package} href="/products" loading={loading} />
           </section>
 

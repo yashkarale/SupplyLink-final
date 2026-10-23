@@ -46,6 +46,11 @@ export const setAuthToken = (token) => {
   localStorage.removeItem("supplylink_token");
 };
 
+export const revokeCurrentSession = async () => {
+  const response = await api.post("/auth/logout");
+  return response.data;
+};
+
 export const loginUser = async (payload) => {
   const response = await api.post("/auth/login", payload);
   return response.data;
@@ -85,6 +90,11 @@ export const uploadSellerPaymentQr = async (file) => {
 
 export const fetchDashboardSummary = async () => {
   const response = await api.get("/sellers/dashboard");
+  return response.data;
+};
+
+export const fetchSellerCustomers = async () => {
+  const response = await api.get("/sellers/customers");
   return response.data;
 };
 
