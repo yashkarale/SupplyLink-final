@@ -25,8 +25,9 @@ export default function Settings() {
   const [qrSaving, setQrSaving] = useState(false);
   const [qrError, setQrError] = useState("");
   const [qrSaved, setQrSaved] = useState(false);
+  const [pendingQrFile, setPendingQrFile] = useState(null);
 
-  const dirty = useMemo(() => Boolean(profile && original && editableFields.some((key) => (profile[key] || "") !== (original[key] || ""))), [profile, original]);
+  const dirty = useMemo(() => Boolean(profile && original && (pendingQrFile || editableFields.some((key) => (profile[key] || "") !== (original[key] || "")))), [profile, original, pendingQrFile]);
 
   useEffect(() => {
     let active = true;
@@ -57,13 +58,23 @@ export default function Settings() {
   const updateProfile = async (event) => {
     event.preventDefault();
     if (!profile || !dirty) return;
-    setSaving(true); setSaved(false); setError("");
+    setSaving(true); setSaved(false); setError(""); setQrError("");
     try {
-      const { seller } = await updateSellerStoreSettings(snapshot(profile));
+      let nextProfile = profile;
+      if (pendingQrFile) {
+        setQrSaving(true);
+        const uploadResponse = await uploadSellerPaymentQr(pendingQrFile);
+        nextProfile = { ...nextProfile, ...uploadResponse.seller };
+        setQrSaving(false);
+      }
+      const { seller } = await updateSellerStoreSettings(snapshot(nextProfile));
       setProfile(seller);
       setOriginal(snapshot(seller));
+      setPendingQrFile(null);
       setSaved(true);
+      setQrSaved(Boolean(pendingQrFile));
     } catch (requestError) {
+      setQrSaving(false);
       setError(requestError?.response?.data?.message || "Unable to save store settings.");
     } finally { setSaving(false); }
   };
@@ -75,19 +86,18 @@ export default function Settings() {
     if (!["image/png", "image/jpeg"].includes(file.type) || file.size > 2 * 1024 * 1024) {
       setQrError("Choose a PNG or JPEG QR image no larger than 2 MB."); event.target.value = ""; return;
     }
-    setQrSaving(true);
     try {
       const image = await createImageBitmap(file);
-      const ratio = Math.max(image.width, image.height) / Math.min(image.width, image.height);
-      const valid = image.width >= 300 && image.height >= 300 && image.width <= 3000 && image.height <= 3000 && ratio <= 1.05;
+      const valid = image.width >= 300 && image.height >= 300 && image.width <= 3000 && image.height <= 3000;
       image.close();
-      if (!valid) throw new Error("Use a square QR image between 300 × 300 and 3000 × 3000 pixels.");
-      const response = await uploadSellerPaymentQr(file);
-      setProfile((current) => ({ ...current, ...response.seller }));
-      setQrSaved(true);
+      if (!valid) throw new Error("Use a QR image between 300 x 300 and 3000 x 3000 pixels.");
+      setPendingQrFile(file);
+      setSaved(false);
     } catch (uploadError) {
-      setQrError(uploadError?.response?.data?.message || uploadError.message || "Unable to upload the payment QR image.");
-    } finally { setQrSaving(false); event.target.value = ""; }
+      setQrError(uploadError?.response?.data?.message || uploadError.message || "Unable to read the QR image.");
+    } finally {
+      event.target.value = "";
+    }
   };
 
   const logout = async () => {
@@ -133,7 +143,7 @@ export default function Settings() {
 
               <div className="mt-5 border-t border-[#e2dccf] pt-5">
                 <div className="flex items-start gap-3"><QrCode size={18} aria-hidden="true" className="mt-0.5 shrink-0 text-[#a86a16]" /><div className="min-w-0"><h3 className="text-sm font-semibold">UPI payment QR</h3><p className={`mt-1 text-xs leading-relaxed ${muted}`}>Customers can use this QR at checkout to pay you directly. PNG or JPEG, square image, 300–3,000 px, maximum 2 MB.</p>
-                  {profile?.paymentQrUrl && <img src={profile.paymentQrUrl} alt="Current UPI payment QR" className="mt-3 size-32 border border-[#e2dccf] bg-white object-contain p-2" />}
+                  {profile?.paymentQrUrl && <img src={profile.paymentQrUrl} alt="Current UPI payment QR" className="mt-3 h-32 w-auto max-w-full border border-[#e2dccf] bg-white object-contain p-2" />}
                   <label className="mt-3 inline-flex min-h-10 cursor-pointer items-center gap-2 border border-[#1c1a17] bg-[#1c1a17] px-3 text-sm font-semibold text-[#fffdf9] transition-colors hover:bg-[#38332b] focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#d98a1f]"> <Upload size={15} aria-hidden="true" />{qrSaving ? "Uploading…" : profile?.paymentQrUrl ? "Replace QR image" : "Upload QR image"}<input type="file" accept="image/png,image/jpeg" onChange={handleQrUpload} disabled={qrSaving} className="sr-only" aria-label="Upload UPI payment QR image" /></label>
                   {qrError && <p role="alert" className="mt-2 text-sm text-[#8b332d]">{qrError}</p>}{qrSaved && <p role="status" className="mt-2 flex items-center gap-1.5 text-sm text-[#3d5d2b]"><Check size={15} />Payment QR updated.</p>}
                 </div></div>

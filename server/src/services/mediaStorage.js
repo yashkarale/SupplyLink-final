@@ -53,8 +53,8 @@ export const inspectUploadedImage = (buffer, contentType, purpose) => {
     throw Object.assign(new Error("Upload a valid PNG or JPEG image."), { status: 400 });
   }
   if (purpose === "payment-qr") {
-    if (Math.min(width, height) < 300 || Math.max(width, height) > 3000 || Math.max(width, height) / Math.min(width, height) > 1.05) {
-      throw Object.assign(new Error("QR image must be square and between 300 × 300 and 3000 × 3000 pixels."), { status: 400 });
+    if (width < 300 || height < 300 || width > 3000 || height > 3000) {
+      throw Object.assign(new Error("QR image must be between 300 × 300 and 3000 × 3000 pixels."), { status: 400 });
     }
   } else if (width < 320 || height < 400) {
     throw Object.assign(new Error("Payment screenshot must be at least 320 × 400 pixels."), { status: 400 });

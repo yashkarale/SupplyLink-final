@@ -10,18 +10,19 @@ const pngHeader = (width, height) => {
 };
 
 describe("uploaded image validation", () => {
-  it("accepts a square, adequately sized payment QR", () => {
-    expect(inspectUploadedImage(pngHeader(600, 600), "image/png", "payment-qr")).toMatchObject({
-      format: "png",
-      width: 600,
-      height: 600,
-    });
+  it("accepts square, portrait, and landscape payment QR images within dimension limits", () => {
+    expect(inspectUploadedImage(pngHeader(600, 600), "image/png", "payment-qr")).toMatchObject({ format: "png", width: 600, height: 600 });
+    expect(inspectUploadedImage(pngHeader(300, 600), "image/png", "payment-qr")).toMatchObject({ width: 300, height: 600 });
+    expect(inspectUploadedImage(pngHeader(600, 300), "image/png", "payment-qr")).toMatchObject({ width: 600, height: 300 });
+    expect(inspectUploadedImage(pngHeader(300, 300), "image/png", "payment-qr")).toMatchObject({ width: 300, height: 300 });
+    expect(inspectUploadedImage(pngHeader(3000, 3000), "image/png", "payment-qr")).toMatchObject({ width: 3000, height: 3000 });
   });
 
-  it("rejects a non-square or too small payment QR", () => {
-    expect(() => inspectUploadedImage(pngHeader(600, 400), "image/png", "payment-qr")).toThrow(/square/i);
-    expect(() => inspectUploadedImage(pngHeader(200, 200), "image/png", "payment-qr")).toThrow(/300/i);
-    expect(() => inspectUploadedImage(pngHeader(3001, 3001), "image/png", "payment-qr")).toThrow(/3000/i);
+  it("rejects payment QR images with either dimension below 300 or above 3000", () => {
+    expect(() => inspectUploadedImage(pngHeader(200, 600), "image/png", "payment-qr")).toThrow(/300/i);
+    expect(() => inspectUploadedImage(pngHeader(600, 200), "image/png", "payment-qr")).toThrow(/300/i);
+    expect(() => inspectUploadedImage(pngHeader(3001, 600), "image/png", "payment-qr")).toThrow(/3000/i);
+    expect(() => inspectUploadedImage(pngHeader(600, 3001), "image/png", "payment-qr")).toThrow(/3000/i);
   });
 
   it("rejects MIME spoofing and oversized image files", () => {

@@ -1508,7 +1508,7 @@ export default function Storefront() {
                           <img
                             src={store.paymentQrUrl}
                             alt={`${businessName} seller payment QR code`}
-                            className="mx-auto mt-5 aspect-square w-56 max-w-full rounded-xl border border-[#E6E2D8] bg-white object-contain p-2"
+                            className="mx-auto mt-5 h-56 w-56 max-w-full rounded-xl border border-[#E6E2D8] bg-white object-contain p-2"
                           />
                           <a
                             href={store.paymentQrUrl}

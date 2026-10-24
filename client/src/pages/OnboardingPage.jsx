@@ -79,10 +79,9 @@ export default function OnboardingPage() {
     }
     try {
       const image = await createImageBitmap(file);
-      const ratio = Math.max(image.width, image.height) / Math.min(image.width, image.height);
-      const valid = image.width >= 300 && image.height >= 300 && image.width <= 3000 && image.height <= 3000 && ratio <= 1.05;
+      const valid = image.width >= 300 && image.height >= 300 && image.width <= 3000 && image.height <= 3000;
       image.close();
-      if (!valid) throw new Error("Choose a square QR image between 300 × 300 and 3000 × 3000 pixels.");
+      if (!valid) throw new Error("Choose a QR image between 300 x 300 and 3000 x 3000 pixels.");
       setPaymentQrFile(file);
     } catch (selectionError) {
       setPaymentQrNotice(selectionError.message || "Unable to read this QR image.");
@@ -261,7 +260,7 @@ export default function OnboardingPage() {
                     <div className="sl-field">
                       <label htmlFor="payment-qr">Seller UPI payment QR <span>Required</span></label>
                       <input id="payment-qr" className="sl-file-input" type="file" accept="image/png,image/jpeg" onChange={handleQrSelection} required aria-invalid={Boolean(paymentQrNotice)} aria-describedby={paymentQrNotice ? "qr-help qr-feedback" : "qr-help"} />
-                      <p id="qr-help" className="sl-field-help">PNG or JPEG, square image between 300 and 3000 pixels, up to 2 MB. Check the payee name before uploading.</p>
+                      <p id="qr-help" className="sl-field-help">PNG or JPEG, image between 300 and 3000 pixels, up to 2 MB. Check the payee name before uploading.</p>
                       {paymentQrFile && <p className="sl-file-selected" role="status">Selected: {paymentQrFile.name}</p>}
                       {paymentQrNotice && <p id="qr-feedback" className="sl-inline-error" role="alert">{paymentQrNotice}</p>}
                     </div>
