@@ -81,5 +81,11 @@ const productSchema = new mongoose.Schema(
 );
 
 productSchema.index({ sellerId: 1, slug: 1 }, { unique: true });
+productSchema.index({ isPublished: 1, status: 1, sellerId: 1, createdAt: -1 });
+productSchema.index({ isPublished: 1, status: 1, category: 1, price: 1 });
+productSchema.index({ name: "text", description: "text" }, {
+  weights: { name: 4, description: 1 },
+  default_language: "none",
+});
 
 export default mongoose.model("Product", productSchema);

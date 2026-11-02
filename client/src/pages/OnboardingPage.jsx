@@ -16,6 +16,16 @@ export default function OnboardingPage() {
     phone: "",
     description: "",
     faqs: "",
+    country: "",
+    state: "",
+    city: "",
+    area: "",
+    locality: "",
+    businessAddress: "",
+    pickupAvailable: false,
+    sellerDeliveryAvailable: false,
+    pickupInstructions: "",
+    deliveryTerms: "",
   });
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -24,6 +34,7 @@ export default function OnboardingPage() {
   const [profileCheck, setProfileCheck] = useState("checking");
   const [paymentQrFile, setPaymentQrFile] = useState(null);
   const [paymentQrNotice, setPaymentQrNotice] = useState("");
+  const [publishImmediately, setPublishImmediately] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -122,10 +133,6 @@ export default function OnboardingPage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!paymentQrFile) {
-      setPaymentQrNotice("Upload the seller payment QR to create your store.");
-      return;
-    }
     setLoading(true);
     setError("");
     try {
@@ -139,6 +146,7 @@ export default function OnboardingPage() {
         description: form.description.trim(),
         category: form.category.trim(),
         faqs: form.faqs.trim(),
+        isPublished: publishImmediately,
       };
       const result = await onboardSeller(payload, paymentQrFile);
       if (result?.alreadyExists) {
@@ -234,14 +242,25 @@ export default function OnboardingPage() {
                     </div>
                     <div className="sl-field">
                       <label htmlFor="shop-category">Category <span>Required</span></label>
-                      <select id="shop-category" name="category" value={form.category} onChange={handleChange} required>
-                        <option>Fashion</option><option>Home</option><option>Beauty</option><option>Accessories</option>
-                      </select>
+                      <input id="shop-category" name="category" maxLength={80} value={form.category} onChange={handleChange} placeholder="e.g. Fashion, groceries, home goods" required />
                     </div>
                     <div className="sl-field">
                       <label htmlFor="shop-description">Store description <span>Optional</span></label>
                       <textarea id="shop-description" name="description" value={form.description} onChange={handleChange} rows={3} placeholder="A short introduction to your shop." />
                     </div>
+                  </div>
+
+                  <div className="sl-form-section">
+                    <h3>Location and fulfilment</h3>
+                    <p className="sl-field-help">Only the business address and location below are public. Pickup instructions remain private to your seller workspace.</p>
+                    <div className="sl-field-row">
+                      {[["country","Country"],["state","State / region"],["city","City"],["area","Area"],["locality","Locality"]].map(([name,label]) => <div className="sl-field" key={name}><label htmlFor={`shop-${name}`}>{label}</label><input id={`shop-${name}`} name={name} maxLength={120} value={form[name]} onChange={handleChange} /></div>)}
+                    </div>
+                    <div className="sl-field"><label htmlFor="shop-business-address">Public business address <span>Optional</span></label><textarea id="shop-business-address" name="businessAddress" maxLength={300} value={form.businessAddress} onChange={handleChange} rows={2} placeholder="Address you want customers to see" /></div>
+                    <div className="sl-inline-toggle"><input id="pickup-available" name="pickupAvailable" type="checkbox" checked={form.pickupAvailable} onChange={(event) => setForm((previous) => ({...previous, pickupAvailable:event.target.checked}))} /><label htmlFor="pickup-available">Offer customer pickup</label></div>
+                    {form.pickupAvailable && <div className="sl-field"><label htmlFor="pickup-instructions">Private pickup instructions <span>Optional</span></label><textarea id="pickup-instructions" name="pickupInstructions" maxLength={500} value={form.pickupInstructions} onChange={handleChange} rows={2} /></div>}
+                    <div className="sl-inline-toggle"><input id="delivery-available" name="sellerDeliveryAvailable" type="checkbox" checked={form.sellerDeliveryAvailable} onChange={(event) => setForm((previous) => ({...previous, sellerDeliveryAvailable:event.target.checked}))} /><label htmlFor="delivery-available">Offer seller delivery</label></div>
+                    {form.sellerDeliveryAvailable && <div className="sl-field"><label htmlFor="delivery-terms">Delivery terms <span>Optional</span></label><textarea id="delivery-terms" name="deliveryTerms" maxLength={1000} value={form.deliveryTerms} onChange={handleChange} rows={2} placeholder="Tell customers how you arrange delivery." /></div>}
                   </div>
 
                   <div className="sl-form-section">
@@ -258,12 +277,20 @@ export default function OnboardingPage() {
                       </div>
                     </div>
                     <div className="sl-field">
-                      <label htmlFor="payment-qr">Seller UPI payment QR <span>Required</span></label>
-                      <input id="payment-qr" className="sl-file-input" type="file" accept="image/png,image/jpeg" onChange={handleQrSelection} required aria-invalid={Boolean(paymentQrNotice)} aria-describedby={paymentQrNotice ? "qr-help qr-feedback" : "qr-help"} />
-                      <p id="qr-help" className="sl-field-help">PNG or JPEG, image between 300 and 3000 pixels, up to 2 MB. Check the payee name before uploading.</p>
+                      <label htmlFor="payment-qr">Seller UPI payment QR <span>Optional</span></label>
+                      <input id="payment-qr" className="sl-file-input" type="file" accept="image/png,image/jpeg" onChange={handleQrSelection} aria-invalid={Boolean(paymentQrNotice)} aria-describedby={paymentQrNotice ? "qr-help qr-feedback" : "qr-help"} />
+                      <p id="qr-help" className="sl-field-help">PNG or JPEG, image between 300 and 3000 pixels, up to 2 MB. Optional for initial storefront setup; you can add it later.</p>
                       {paymentQrFile && <p className="sl-file-selected" role="status">Selected: {paymentQrFile.name}</p>}
                       {paymentQrNotice && <p id="qr-feedback" className="sl-inline-error" role="alert">{paymentQrNotice}</p>}
                     </div>
+                  </div>
+
+                  <div className="sl-form-section sl-form-section--compact">
+                    <div className="sl-inline-toggle">
+                      <input id="publish-store" type="checkbox" checked={publishImmediately} onChange={(event) => setPublishImmediately(event.target.checked)} />
+                      <label htmlFor="publish-store">Publish my store immediately</label>
+                    </div>
+                    <p className="sl-field-help">Draft stores stay hidden from the public marketplace until you publish them from your settings.</p>
                   </div>
 
                   <div className="sl-form-section">
@@ -280,7 +307,7 @@ export default function OnboardingPage() {
                   <button type="submit" className="sl-auth-submit" disabled={loading} aria-busy={loading}>
                     <span>{loading ? "Creating your store…" : "Create store"}</span>{!loading && <ArrowRight size={17} aria-hidden="true" />}
                   </button>
-                  <p className="sl-form-footnote">Your store is created after the server validates these details and the payment QR.</p>
+                  <p className="sl-form-footnote">Your store is created after the server validates the business details. You can add a payment QR from settings later.</p>
                 </form>
               </>
             ) : (

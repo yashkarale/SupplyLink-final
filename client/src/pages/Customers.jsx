@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { AlertCircle, ArrowUpRight, Mail, Phone, Search, Users } from "lucide-react";
 import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
 import SkeletonLoader from "../components/ui/SkeletonLoader";
 import Modal from "../components/ui/Modal";
-import { fetchSellerCustomers } from "../services/api";
+import { fetchCustomerOrderHistory, fetchSellerCustomers } from "../services/api";
 
 const formatCurrency = (value) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(Number(value || 0));
 const formatDate = (value) => value ? new Date(value).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "Date unavailable";
@@ -22,35 +22,43 @@ export default function Customers() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
+  const [summary, setSummary] = useState({ customerCount: 0, repeatCustomers: 0, recognizedSpend: 0 });
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
 
   const loadCustomers = useCallback(async () => {
     setError("");
     try {
-      const response = await fetchSellerCustomers();
+      const response = await fetchSellerCustomers({ page, limit: 25, search: search.trim() || undefined, fromDate: fromDate || undefined, toDate: toDate ? `${toDate}T23:59:59.999` : undefined });
       setCustomers(Array.isArray(response?.customers) ? response.customers : []);
+      setPagination(response?.pagination || { page, totalPages: 1, total: 0 });
+      setSummary(response?.summary || { customerCount: 0, repeatCustomers: 0, recognizedSpend: 0 });
     } catch (err) {
       setError(err?.response?.data?.message || err?.message || "Unable to load customer records.");
     } finally {
       setLoading(false);
     }
-  }, []);
-  useEffect(() => { loadCustomers(); }, [loadCustomers]);
+  }, [page, search, fromDate, toDate]);
+  useEffect(() => { const timer=window.setTimeout(()=>loadCustomers(),180); return ()=>window.clearTimeout(timer); }, [loadCustomers]);
 
-  const filteredCustomers = useMemo(() => customers.filter((customer) => `${customer.name} ${customer.email} ${customer.phone} ${customer.city}`.toLowerCase().includes(search.trim().toLowerCase())), [customers, search]);
-  const repeatCustomers = customers.filter((customer) => customer.orderCount > 1).length;
-  const recognizedSpend = customers.reduce((sum, customer) => sum + Number(customer.recognizedSpend || 0), 0);
+  const filteredCustomers = customers;
+  const repeatCustomers = Number(summary.repeatCustomers || 0);
+  const recognizedSpend = Number(summary.recognizedSpend || 0);
 
   return <main className="min-w-0 space-y-5 text-ink sm:space-y-6">
-    <PageHeader title="Customers" description="A seller-scoped contact directory built from customer details on your store orders." theme={theme}><span className="inline-flex min-h-10 items-center gap-2 rounded-[5px] border border-line bg-surface px-3 text-sm text-muted"><Users size={15}/><strong className="text-ink">{loading ? "—" : customers.length}</strong><span>customers</span></span></PageHeader>
+    <PageHeader title="Customers" description="A seller-scoped contact directory built from customer details on your store orders." theme={theme}><span className="inline-flex min-h-10 items-center gap-2 rounded-[5px] border border-line bg-surface px-3 text-sm text-muted"><Users size={15}/><strong className="text-ink">{loading ? "—" : pagination.total}</strong><span>customers</span></span></PageHeader>
     {error && <div role="alert" className="flex flex-wrap items-center gap-2 rounded-[var(--radius-card)] border border-danger/30 bg-danger/5 p-3 text-sm text-danger"><AlertCircle size={16}/><span className="min-w-0 flex-1">{error}</span>{!loading && <button type="button" onClick={()=>{setLoading(true);loadCustomers();}} className="min-h-10 shrink-0 underline underline-offset-2">Retry</button>}</div>}
-    <section aria-label="Customer summary" className="grid grid-cols-1 gap-3 sm:grid-cols-3">{[{label:"Customers",value:loading?"—":customers.length},{label:"Repeat orderers",value:loading?"—":repeatCustomers},{label:"Recognized spend",value:loading?"—":formatCurrency(recognizedSpend)}].map(({label,value})=><div key={label} className="min-w-0 rounded-[var(--radius-card)] border border-line bg-surface p-4"><p className="text-xs text-muted">{label}</p><p className="mt-1 break-words text-lg font-semibold tabular-nums">{value}</p></div>)}</section>
+    <section aria-label="Customer summary" className="grid grid-cols-1 gap-3 sm:grid-cols-3">{[{label:"Customers",value:loading?"—":pagination.total},{label:"Repeat orderers",value:loading?"—":repeatCustomers},{label:"Recognized spend",value:loading?"—":formatCurrency(recognizedSpend)}].map(({label,value})=><div key={label} className="min-w-0 rounded-[var(--radius-card)] border border-line bg-surface p-4"><p className="text-xs text-muted">{label}</p><p className="mt-1 break-words text-lg font-semibold tabular-nums">{value}</p></div>)}</section>
     <section className="overflow-hidden rounded-[var(--radius-card)] border border-line bg-surface">
-      <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div><h2 className="font-semibold">Customer directory</h2><p className="mt-1 text-xs text-muted">{loading?"Loading customer records…":`${filteredCustomers.length} of ${customers.length} customers`}</p></div><label className="flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] border border-line bg-paper px-3"><Search size={15} className="shrink-0 text-muted"/><span className="sr-only">Search customers</span><input aria-label="Search customers" value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Name, phone, email, city" className="h-10 min-w-0 bg-transparent text-sm outline-none placeholder:text-muted sm:w-64"/></label></div>
+      <div className="flex flex-col gap-3 border-b border-line p-4 sm:px-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">Customer directory</h2><p className="mt-1 text-xs text-muted">{loading?"Loading customer records…":`${pagination.total} matching customers`}</p></div><label className="flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] border border-line bg-paper px-3"><Search size={15} className="shrink-0 text-muted"/><span className="sr-only">Search customers</span><input aria-label="Search customers" value={search} onChange={(e)=>{setSearch(e.target.value);setPage(1);}} placeholder="Name, phone, email, city" className="h-10 min-w-0 bg-transparent text-sm outline-none placeholder:text-muted sm:w-64"/></label></div><div className="flex flex-wrap gap-3"><label className="text-xs text-muted">From <input aria-label="Customers from date" type="date" value={fromDate} onChange={(e)=>{setFromDate(e.target.value);setPage(1);}} className="ml-2 h-10 rounded-[var(--radius-control)] border border-line bg-paper px-2 text-sm"/></label><label className="text-xs text-muted">To <input aria-label="Customers to date" type="date" value={toDate} onChange={(e)=>{setToDate(e.target.value);setPage(1);}} className="ml-2 h-10 rounded-[var(--radius-control)] border border-line bg-paper px-2 text-sm"/></label></div></div>
       {loading ? <div className="space-y-4 p-5"><SkeletonLoader height={24} width="25%" theme={theme}/><SkeletonLoader height={100} width="100%" theme={theme}/><SkeletonLoader height={100} width="100%" theme={theme}/></div>
         : filteredCustomers.length===0 ? <EmptyState title={error&&!customers.length?"Customer records unavailable":customers.length?"No matching customers":"No customer records yet"} description={error&&!customers.length?"Retry loading seller customer records to check customers.":customers.length?"Try a different name, phone number, email, or city.":"Customer details from storefront orders will appear here."} icon={Users}/>
         : <div className="grid divide-y divide-line md:grid-cols-2 md:divide-y-0 md:gap-3 md:p-3 xl:grid-cols-3">{filteredCustomers.map((customer)=><CustomerCard key={customer.key} customer={customer} onSelect={()=>setSelectedCustomer(customer)}/>)}</div>}
     </section>
-    <p className="text-xs leading-relaxed text-muted">Orders are grouped per seller by matching normalized email and phone together, or by the one available contact. Names never identify customers; orders with no usable contact stay separate. Order counts include all statuses. Recognized spend includes verified payments and delivered COD, excluding cancelled and returned orders. Buyer refunds are not recorded in the order data, so this is not net of refunds.</p>
+    {!loading && pagination.totalPages>1 && <div className="flex items-center justify-between rounded-[var(--radius-card)] border border-line bg-surface p-3"><button type="button" disabled={page<=1} onClick={()=>setPage((value)=>value-1)} className="min-h-10 px-2 text-sm disabled:opacity-40">Previous</button><span className="text-xs text-muted">Page {page} of {pagination.totalPages}</span><button type="button" disabled={page>=pagination.totalPages} onClick={()=>setPage((value)=>value+1)} className="min-h-10 px-2 text-sm disabled:opacity-40">Next</button></div>}
+    <p className="text-xs leading-relaxed text-muted">Customers are grouped from seller-owned orders by normalized email and phone. Lists are aggregated and paginated by the database. Spend includes verified payments and delivered COD, excluding cancelled and returned orders; order records do not contain refund amounts. The details panel shows the latest order summary; use Orders or Sales History to search transaction records.</p>
     <Modal isOpen={Boolean(selectedCustomer)} onClose={()=>setSelectedCustomer(null)} title={selectedCustomer?.name || "Customer details"} maxWidth="max-w-2xl">{selectedCustomer && <CustomerDetails customer={selectedCustomer}/>}</Modal>
   </main>;
 }
@@ -61,8 +69,23 @@ function CustomerCard({ customer, onSelect }) {
 }
 
 function CustomerDetails({ customer }) {
+  const [orders, setOrders] = useState([]);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [historyError, setHistoryError] = useState("");
+  const loadHistory = useCallback(async (requestedPage) => {
+    setLoadingHistory(true); setHistoryError("");
+    try {
+      const response = await fetchCustomerOrderHistory(customer.historyIdentity, { page: requestedPage, limit: 10 });
+      setOrders((response?.orders || []).map((order) => ({ reference: order.orderReference || "Order", status: order.orderStatus, createdAt: order.createdAt, total: order.totalAmount, paymentMethod: order.paymentMethod || "Unknown", paymentStatus: order.paymentStatus || "unknown" })));
+      setPagination(response?.pagination || { page: requestedPage, totalPages: 1, total: 0 }); setPage(requestedPage);
+    } catch (err) { setHistoryError(err?.response?.data?.message || err?.message || "Unable to load order history."); }
+    finally { setLoadingHistory(false); }
+  }, [customer.historyIdentity]);
+  useEffect(() => { loadHistory(1); }, [loadHistory]);
   const whatsapp = whatsappDigits(customer.phone);
-  return <div className="space-y-5"><section className="grid gap-4 rounded-[var(--radius-control)] border border-line bg-paper p-4 sm:grid-cols-2"><CustomerDetail label="Phone" value={customer.phone}/><CustomerDetail label="Email" value={customer.email}/><CustomerDetail label="City" value={customer.city}/><CustomerDetail label="Postal code" value={customer.postalCode}/><CustomerDetail label="Delivery address on latest order" value={customer.address}/><CustomerDetail label="Recorded orders" value={customer.orderCount}/><CustomerDetail label="Recognized spend" value={formatCurrency(customer.recognizedSpend)}/><CustomerDetail label="Latest order" value={formatDate(customer.lastOrderAt)}/></section><div className="flex flex-wrap gap-2">{isValidTelephone(customer.phone)&&<a href={`tel:${telephoneHref(customer.phone)}`} className="inline-flex min-h-10 items-center gap-2 rounded-[var(--radius-control)] border border-line px-3 text-sm font-semibold hover:bg-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]"><Phone size={15}/>Call</a>}{customer.email&&<a href={`mailto:${customer.email}`} className="inline-flex min-h-10 items-center gap-2 rounded-[var(--radius-control)] border border-line px-3 text-sm font-semibold hover:bg-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]"><Mail size={15}/>Email</a>}{whatsapp&&<a href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center gap-2 rounded-[var(--radius-control)] border border-line px-3 text-sm font-semibold hover:bg-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]">WhatsApp<ArrowUpRight size={14}/></a>}</div><section><h3 className="font-semibold">Order history</h3>{customer.orders.length ? <ol className="mt-2 divide-y divide-line rounded-[var(--radius-control)] border border-line">{customer.orders.map((order,index)=><li key={`${order.reference}-${index}`} className="flex min-w-0 flex-wrap items-center justify-between gap-3 p-3"><div className="min-w-0"><p className="break-all text-sm font-medium">{order.reference}</p><p className="mt-1 text-xs text-muted">{formatDate(order.createdAt)} · {order.paymentMethod} · payment {order.paymentStatus.toLowerCase()}</p></div><div className="flex shrink-0 flex-col items-end gap-1"><span className="text-sm font-semibold tabular-nums">{formatCurrency(order.total)}</span><span className="text-xs text-muted">{orderState(order.status)}</span></div></li>)}</ol>:<p className="mt-2 text-sm text-muted">No order records.</p>}</section><p className="text-xs leading-relaxed text-muted">Recognized spend includes verified payments and delivered COD, excluding cancelled and returned orders. The order schema has no buyer refund amounts, so spend cannot be netted against refunds.</p></div>;
+  return <div className="space-y-5"><section className="grid gap-4 rounded-[var(--radius-control)] border border-line bg-paper p-4 sm:grid-cols-2"><CustomerDetail label="Phone" value={customer.phone}/><CustomerDetail label="Email" value={customer.email}/><CustomerDetail label="City" value={customer.city}/><CustomerDetail label="Postal code" value={customer.postalCode}/><CustomerDetail label="Delivery address on latest order" value={customer.address}/><CustomerDetail label="Recorded orders" value={customer.orderCount}/><CustomerDetail label="Recognized spend" value={formatCurrency(customer.recognizedSpend)}/><CustomerDetail label="Latest order" value={formatDate(customer.lastOrderAt)}/></section><div className="flex flex-wrap gap-2">{isValidTelephone(customer.phone)&&<a href={`tel:${telephoneHref(customer.phone)}`} className="inline-flex min-h-10 items-center gap-2 rounded-[var(--radius-control)] border border-line px-3 text-sm font-semibold hover:bg-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]"><Phone size={15}/>Call</a>}{customer.email&&<a href={`mailto:${customer.email}`} className="inline-flex min-h-10 items-center gap-2 rounded-[var(--radius-control)] border border-line px-3 text-sm font-semibold hover:bg-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]"><Mail size={15}/>Email</a>}{whatsapp&&<a href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center gap-2 rounded-[var(--radius-control)] border border-line px-3 text-sm font-semibold hover:bg-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]">WhatsApp<ArrowUpRight size={14}/></a>}</div><section><h3 className="font-semibold">Order history ({pagination.total})</h3>{loadingHistory ? <p className="mt-2 text-sm text-muted">Loading order history…</p> : historyError ? <p role="alert" className="mt-2 text-sm text-danger">{historyError}</p> : orders.length ? <ol className="mt-2 divide-y divide-line rounded-[var(--radius-control)] border border-line">{orders.map((order,index)=><li key={`${order.reference}-${index}`} className="flex min-w-0 flex-wrap items-center justify-between gap-3 p-3"><div className="min-w-0"><p className="break-all text-sm font-medium">{order.reference}</p><p className="mt-1 text-xs text-muted">{formatDate(order.createdAt)} · {order.paymentMethod} · payment {order.paymentStatus.toLowerCase()}</p></div><div className="flex shrink-0 flex-col items-end gap-1"><span className="text-sm font-semibold tabular-nums">{formatCurrency(order.total)}</span><span className="text-xs text-muted">{orderState(order.status)}</span></div></li>)}</ol> : <p className="mt-2 text-sm text-muted">No order records.</p>}{!loadingHistory && pagination.totalPages>1 && <div className="mt-2 flex items-center justify-between"><button type="button" disabled={page<=1} onClick={()=>loadHistory(page-1)} className="min-h-10 px-2 text-sm disabled:opacity-40">Previous</button><span className="text-xs text-muted">Page {page} of {pagination.totalPages}</span><button type="button" disabled={page>=pagination.totalPages} onClick={()=>loadHistory(page+1)} className="min-h-10 px-2 text-sm disabled:opacity-40">Next</button></div>}</section><p className="text-xs leading-relaxed text-muted">Recognized spend includes verified payments and delivered COD, excluding cancelled and returned orders. The order schema has no buyer refund amounts, so spend cannot be netted against refunds.</p></div>;
 }
 
 function CustomerDetail({ label, value }) { return <div className="min-w-0"><p className="text-xs text-muted">{label}</p><p className="mt-1 break-words text-sm font-medium">{value || "Not provided"}</p></div>; }

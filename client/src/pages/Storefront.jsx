@@ -1,5 +1,5 @@
 
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import "./StorefrontPremium.css";
 import {
   ArrowDownUp,
@@ -7,6 +7,7 @@ import {
   BadgeCheck,
   Bot,
   Check,
+  Clock,
   Heart,
   Leaf,
   Menu,
@@ -22,7 +23,7 @@ import {
   Truck,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   buildStoreContactUrl,
@@ -53,15 +54,17 @@ const createRequestId = () =>
   `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const normalizeProduct = (product, index) => ({
   id: product?._id || product?.id || `${product?.name || "product"}-${index}`,
+  slug: product?.slug || "",
   name: product?.name || `Product ${index + 1}`,
   price: Number(product?.price ?? 0),
   compareAt: Number(product?.compareAtPrice || product?.compareAt || 0),
   tag: product?.category || "General",
   accent: accentThemes[index % accentThemes.length],
-  stock: Math.max(0, Number(product?.stock ?? 0)),
+  availability: ["in_stock", "out_of_stock", "seller_confirmation_required"].includes(product?.availability)
+    ? product.availability
+    : "seller_confirmation_required",
   description: product?.description || "",
   images: Array.isArray(product?.images) ? product.images : [],
-  sku: product?.sku || "",
 });
 const getStoreGuideAnswer = (question, storeName, productList, faqList = []) => {
   const q = String(question || "").trim().toLowerCase();
@@ -105,7 +108,7 @@ const getStoreGuideAnswer = (question, storeName, productList, faqList = []) => 
     q.includes(product.name.toLowerCase())
   );
   if (match) {
-    return `${match.name} is listed at ${formatCurrency(match.price)}. ${match.description || "The seller has not added a detailed description yet."} ${match.stock > 0 ? `${match.stock} available.` : "Currently out of stock."}`;
+    return `${match.name} is listed at ${formatCurrency(match.price)}. ${match.description || "The seller has not added a detailed description yet."} ${match.availability === "in_stock" ? "Listed as in stock." : match.availability === "out_of_stock" ? "Currently sold out." : "Please contact the seller to confirm availability."}`;
   }
   return `I couldn't find enough published information to answer that accurately. Contact ${storeName} directly for confirmation.`;
 };
@@ -182,11 +185,6 @@ function ProductCard({ product, index = 0, onAdd, onBuy, onToggleWishlist, isWis
               {discount}% off
             </span>
           )}
-          {product.stock > 0 && product.stock <= 5 && (
-            <span className="rounded-[3px] border border-warning/25 bg-warning-soft px-2 py-1 text-[9px] font-bold text-warning">
-              Only {product.stock} left
-            </span>
-          )}
         </div>
         <button
           type="button"
@@ -201,7 +199,7 @@ function ProductCard({ product, index = 0, onAdd, onBuy, onToggleWishlist, isWis
         >
           <Heart size={17} fill={isWishlisted ? "currentColor" : "none"} />
         </button>
-        {product.stock < 1 && (
+        {product.availability === "out_of_stock" && (
           <div className="pointer-events-none absolute inset-0 z-[5] grid place-items-center bg-paper/65">
             <span className="rounded-[3px] border border-line bg-surface px-3 py-2 text-xs font-semibold text-ink">
               Sold out
@@ -214,9 +212,9 @@ function ProductCard({ product, index = 0, onAdd, onBuy, onToggleWishlist, isWis
           <span className="min-w-0 truncate text-[9px] font-semibold uppercase tracking-[0.13em] text-muted">
             {product.tag}
           </span>
-          <span className={`inline-flex shrink-0 items-center gap-1 text-[9px] font-semibold ${product.stock > 0 ? "text-success" : "text-danger"}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${product.stock > 0 ? "bg-success" : "bg-danger"}`} />
-            {product.stock > 0 ? `${product.stock} available` : "Sold out"}
+          <span className={`inline-flex shrink-0 items-center gap-1 text-[9px] font-semibold ${product.availability === "out_of_stock" ? "text-danger" : "text-success"}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${product.availability === "out_of_stock" ? "bg-danger" : "bg-success"}`} />
+          {product.availability === "in_stock" ? "Listed as in stock" : product.availability === "out_of_stock" ? "Listed as sold out" : "Check with seller"}
             </span>
         </div>
         <h3 className="mt-2 min-h-[2.7rem] break-words text-sm font-semibold leading-snug text-ink sm:text-base">
@@ -240,7 +238,7 @@ function ProductCard({ product, index = 0, onAdd, onBuy, onToggleWishlist, isWis
           <Button
             variant="secondary"
             className="min-h-10 w-full min-w-0 rounded-[var(--radius-control)] px-2 text-[11px] sm:text-xs"
-            disabled={product.stock < 1}
+            disabled={product.availability === "out_of_stock"}
             onClick={() => onAdd(product)}
           >
             <ShoppingBag size={14} aria-hidden="true" /> Add to bag
@@ -248,7 +246,7 @@ function ProductCard({ product, index = 0, onAdd, onBuy, onToggleWishlist, isWis
           <Button
             variant="outline"
             className="min-h-10 w-full min-w-0 rounded-[var(--radius-control)] px-2 text-[11px] sm:text-xs"
-            disabled={product.stock < 1 || !contactAvailable || !paymentReady}
+            disabled={product.availability === "out_of_stock" || !contactAvailable || !paymentReady}
             onClick={() => onBuy(product)}
           >
             <span className="truncate">Buy now</span>
@@ -261,6 +259,7 @@ function ProductCard({ product, index = 0, onAdd, onBuy, onToggleWishlist, isWis
 }
 export default function Storefront() {
   const { slug } = useParams();
+  const [searchParams] = useSearchParams();
   const paymentSessionKey = `supplylink-payment-${slug || "store"}`;
   const [restoredPayment] = useState(() => {
     try {
@@ -292,12 +291,25 @@ export default function Storefront() {
   const [faqs, setFaqs] = useState([]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState(null);
+  const autoOpenedProduct = useRef("");
   const [requestedProductQuantity, setRequestedProductQuantity] = useState(1);
   const selectedProduct = useMemo(
     () => products.find((product) => product.id === selectedProductId) || null,
     [products, selectedProductId]
   );
-  const selectedQuantity = Math.min(requestedProductQuantity, Math.max(1, selectedProduct?.stock || 1));
+  useEffect(() => {
+    const requestedSlug = searchParams.get("product");
+    if (!requestedSlug || !products.length) return;
+    const requestKey = `${slug}:${requestedSlug}`;
+    if (autoOpenedProduct.current === requestKey) return;
+    const requestedProduct = products.find((product) => product.slug === requestedSlug || product.id === requestedSlug);
+    if (requestedProduct) {
+      autoOpenedProduct.current = requestKey;
+      setSelectedProductId(requestedProduct.id);
+      setRequestedProductQuantity(1);
+    }
+  }, [products, searchParams, slug]);
+  const selectedQuantity = Math.min(requestedProductQuantity, 99);
   const reduceMotion = useReducedMotion();
   const [checkoutForm, setCheckoutForm] = useState({
     name: "",
@@ -400,6 +412,12 @@ export default function Storefront() {
     [store]
   );
   const category = store?.category || "Independent collection";
+  const storeLocation = [store?.locality, store?.city, store?.state, store?.country]
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join(", ");
+  const publishedHours = (Array.isArray(store?.openingHours) ? store.openingHours : [])
+    .filter((hours) => hours.day && (hours.isClosed || hours.intervals?.length));
   useEffect(() => {
     if (!store) return undefined;
     const previousTitle = document.title;
@@ -427,21 +445,19 @@ export default function Storefront() {
         !query ||
         product.name.toLowerCase().includes(query) ||
         product.description.toLowerCase().includes(query) ||
-        product.tag.toLowerCase().includes(query) ||
-        product.sku.toLowerCase().includes(query);
+        product.tag.toLowerCase().includes(query);
       const matchesCategory =
         categoryFilter === "All" || product.tag === categoryFilter;
-      const matchesStock = !inStockOnly || product.stock > 0;
+      const matchesStock = !inStockOnly || product.availability === "in_stock";
       return matchesSearch && matchesCategory && matchesStock;
     });
     if (sortBy === "price-low") result.sort((a, b) => a.price - b.price);
     if (sortBy === "price-high") result.sort((a, b) => b.price - a.price);
     if (sortBy === "name") result.sort((a, b) => a.name.localeCompare(b.name));
-    if (sortBy === "stock") result.sort((a, b) => b.stock - a.stock);
     return result;
   }, [products, search, categoryFilter, inStockOnly, sortBy]);
   const featuredProducts = useMemo(
-    () => products.filter((product) => product.stock > 0).slice(0, 3),
+    () => products.filter((product) => product.availability === "in_stock").slice(0, 3),
     [products]
   );
   const cartCount = useMemo(
@@ -465,14 +481,14 @@ export default function Storefront() {
     setRequestedProductQuantity(1);
   };
   const addToCart = (product, quantity = 1) => {
-    if (product.stock < 1) return;
-    const requestedQuantity = Math.min(product.stock, Math.max(1, Math.floor(Number(quantity) || 1)));
+    if (product.availability === "out_of_stock") return;
+    const requestedQuantity = Math.min(99, Math.max(1, Math.floor(Number(quantity) || 1)));
     setCart((current) => {
       const existing = current.find((item) => item.id === product.id);
       if (existing) {
         return current.map((item) =>
           item.id === product.id
-            ? { ...item, stock: product.stock, quantity: Math.min(product.stock, item.quantity + requestedQuantity) }
+            ? { ...item, quantity: Math.min(99, item.quantity + requestedQuantity) }
             : item
         );
       }
@@ -482,7 +498,6 @@ export default function Storefront() {
           id: product.id,
           name: product.name,
           price: Number(product.price || 0),
-          stock: Number(product.stock || 0),
           quantity: requestedQuantity,
         },
       ];
@@ -494,13 +509,12 @@ export default function Storefront() {
     setCheckoutRequestId(createRequestId());
   };
   const buyNow = (product, quantity = 1) => {
-    if (product.stock < 1 || !contactAvailable || !paymentReady) return;
-    const requestedQuantity = Math.min(product.stock, Math.max(1, Math.floor(Number(quantity) || 1)));
+    if (product.availability === "out_of_stock" || !contactAvailable || !paymentReady) return;
+    const requestedQuantity = Math.min(99, Math.max(1, Math.floor(Number(quantity) || 1)));
     setCart([{
       id: product.id,
       name: product.name,
       price: Number(product.price || 0),
-      stock: Number(product.stock || 0),
       quantity: requestedQuantity,
     }]);
     setOrderCheckout(null);
@@ -516,7 +530,7 @@ export default function Storefront() {
         .map((item) => {
           if (item.id !== productId) return item;
           const safeQuantity = Math.min(
-            item.stock,
+            99,
             Math.max(0, Number(nextQuantity))
           );
           return safeQuantity === 0 ? null : { ...item, quantity: safeQuantity };
@@ -797,6 +811,8 @@ export default function Storefront() {
             </div>
           </Link>
           <nav className="hidden items-center gap-6 lg:flex">
+            <Link to="/marketplace" className="text-sm font-semibold text-[#4A4F5C] transition hover:text-[#171B24]">Discover</Link>
+            <Link to="/shops" className="text-sm font-semibold text-[#4A4F5C] transition hover:text-[#171B24]">All shops</Link>
             <a href="#collection" className="text-sm font-semibold text-[#4A4F5C] transition hover:text-[#171B24]">Collection</a>
             <a href="#our-story" className="text-sm font-semibold text-[#4A4F5C] transition hover:text-[#171B24]">About</a>
             <a href="#store-guide" className="text-sm font-semibold text-[#4A4F5C] transition hover:text-[#171B24]">Store guide</a>
@@ -842,6 +858,8 @@ export default function Storefront() {
             className="col-span-full overflow-hidden border-t border-[#E2DCCF] bg-[#F7F4EE] px-5 py-4 lg:hidden"
           >
             <nav className="flex flex-col gap-4 text-sm font-semibold text-[#4A4F5C]">
+              <Link to="/marketplace" onClick={() => setMobileMenuOpen(false)}>Discover products</Link>
+              <Link to="/shops" onClick={() => setMobileMenuOpen(false)}>Browse all shops</Link>
               <a href="#collection" onClick={() => setMobileMenuOpen(false)}>Shop collection</a>
               <a href="#our-story" onClick={() => setMobileMenuOpen(false)}>About this store</a>
               <a href="#store-guide" onClick={() => setMobileMenuOpen(false)}>Store guide</a>
@@ -896,6 +914,10 @@ export default function Storefront() {
                 <p className="mt-5 max-w-lg text-sm leading-7 text-[#6F685D] sm:text-base sm:leading-8">
                   {businessDescription}
                 </p>
+                {storeLocation && (
+                  <p className="mt-3 text-xs font-semibold text-[#6F685D]">{storeLocation}</p>
+                )}
+                {store?.businessAddress && <p className="mt-1 text-xs text-[#6F685D]">{store.businessAddress}</p>}
                 <div className="mt-7 flex flex-wrap gap-3">
                   <a
                     href="#collection"
@@ -920,7 +942,7 @@ export default function Storefront() {
                   </span>
                   <span className="inline-flex items-center gap-2">
                     <Package size={15} />
-                    Live product availability
+                    Availability information
                   </span>
                 </div>
                 </motion.div>
@@ -966,7 +988,7 @@ export default function Storefront() {
                               />
                             )}
                             <span className="absolute left-3 top-3 border border-[#E2DCCF] bg-[#FFFDF9] px-2 py-1 text-[10px] font-semibold text-[#1C1A17]">
-                              {product.stock > 0 ? `${product.stock} in stock` : "Sold out"}
+                              {product.availability === "in_stock" ? "Listed as in stock" : product.availability === "out_of_stock" ? "Listed as sold out" : "Check with seller"}
                             </span>
                           </button>
                           <div className="flex items-center justify-between gap-3 p-4">
@@ -1028,7 +1050,7 @@ export default function Storefront() {
         <section className="storefront-stats mx-auto grid max-w-7xl grid-cols-2 gap-3 px-4 pb-12 sm:grid-cols-4 sm:gap-4 sm:px-6 lg:px-8">
           {[
             { icon: ShoppingBag, value: products.length, label: "Listed products" },
-            { icon: Package, value: products.filter((item) => item.stock > 0).length, label: "Available now" },
+            { icon: Package, value: products.filter((item) => item.availability === "in_stock").length, label: "Listed in stock" },
             { icon: Star, value: categories.length, label: "Categories" },
             { icon: MessageCircle, value: contactAvailable ? "Ready" : "Unavailable", label: "Seller contact" },
           ].map(({ icon: Icon, value, label }) => (
@@ -1041,6 +1063,13 @@ export default function Storefront() {
             </div>
           ))}
         </section>
+        {(store.pickupAvailable || store.sellerDeliveryAvailable || publishedHours.length > 0) && (
+          <section aria-label="Store visit and delivery information" className="mx-auto mb-12 grid max-w-7xl gap-4 px-4 sm:grid-cols-2 sm:px-6 lg:grid-cols-3 lg:px-8">
+            {store.pickupAvailable && <div className="border border-[#E2DCCF] bg-[#FFFDF9] p-5"><h2 className="font-serif text-lg font-semibold">Pickup</h2><p className="mt-2 text-sm leading-6 text-[#6F685D]">Pickup is offered by this shop. Contact the seller to confirm the pickup point and arrange a time before visiting.</p><button type="button" onClick={() => handleSellerContact()} disabled={!contactAvailable} className="mt-3 text-sm font-semibold underline underline-offset-4 disabled:opacity-50">Ask about pickup</button></div>}
+            {store.sellerDeliveryAvailable && <div className="border border-[#E2DCCF] bg-[#FFFDF9] p-5"><h2 className="font-serif text-lg font-semibold">Seller delivery</h2><p className="mt-2 text-sm leading-6 text-[#6F685D]">{store.deliveryTerms || "Seller delivery is offered. Contact the shop to confirm availability, fees, and delivery timing."}</p>{Array.isArray(store.deliveryAreas) && store.deliveryAreas.length > 0 && <ul className="mt-3 space-y-1 text-xs text-[#6F685D]">{store.deliveryAreas.map((area, index) => <li key={`${area.area}-${index}`}>{area.area}{area.fee > 0 ? ` · ${formatCurrency(area.fee)} delivery fee` : ""}{area.minimumOrder > 0 ? ` · minimum order ${formatCurrency(area.minimumOrder)}` : ""}</li>)}</ul>}</div>}
+            {publishedHours.length > 0 && <div className="border border-[#E2DCCF] bg-[#FFFDF9] p-5"><h2 className="flex items-center gap-2 font-serif text-lg font-semibold"><Clock size={17}/>Business hours</h2><ul className="mt-3 space-y-2 text-sm text-[#6F685D]">{publishedHours.map((hours) => <li key={hours.day} className="flex justify-between gap-3"><span>{titleCase(hours.day.toLowerCase())}</span><span className="text-right">{hours.isClosed ? "Closed" : hours.intervals.map((interval) => `${interval.open}–${interval.close}`).join(", ")}</span></li>)}</ul></div>}
+          </section>
+        )}
         <section id="collection" className="mx-auto max-w-7xl scroll-mt-28 px-4 pb-14 sm:px-6 lg:px-8">
           <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
             <div>
@@ -1088,7 +1117,6 @@ export default function Storefront() {
                     <option value="price-low">Price: low to high</option>
                     <option value="price-high">Price: high to low</option>
                     <option value="name">Name: A to Z</option>
-                    <option value="stock">Availability</option>
                   </select>
                 </label>
                 <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#E6E2D8] bg-[#F5F3ED] px-3 py-3 text-xs font-semibold text-[#4A4F5C]">
@@ -1378,12 +1406,9 @@ export default function Storefront() {
               <div>
                 <p className="text-2xl font-extrabold text-[#171B24]">{formatCurrency(selectedProduct.price)}</p>
                 <p className="mt-1 text-xs text-[#4A4F5C]">
-                  {selectedProduct.stock > 0 ? `${selectedProduct.stock} in stock` : "Out of stock"}
+                  {selectedProduct.availability === "in_stock" ? "Listed as in stock" : selectedProduct.availability === "out_of_stock" ? "Listed as sold out" : "Check with seller"}
                 </p>
               </div>
-              {selectedProduct.sku ? (
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#8A8F99]">SKU {selectedProduct.sku}</p>
-              ) : null}
             </div>
             <div className="mt-5 flex items-center justify-between gap-4 rounded-2xl border border-[#E6E2D8] bg-white px-4 py-3">
               <span className="text-sm font-semibold text-[#171B24]">Quantity</span>
@@ -1401,8 +1426,8 @@ export default function Storefront() {
                 <button
                   type="button"
                   aria-label="Increase quantity"
-                  disabled={selectedQuantity >= selectedProduct.stock}
-                  onClick={() => setRequestedProductQuantity(Math.min(selectedProduct.stock, selectedQuantity + 1))}
+                  disabled={selectedQuantity >= 99}
+                  onClick={() => setRequestedProductQuantity(Math.min(99, selectedQuantity + 1))}
                   className="grid h-10 w-10 place-items-center rounded-full border border-[#E6E2D8] bg-[#F5F3ED] text-[#171B24] disabled:opacity-40"
                 >
                   <Plus size={15} />
@@ -1412,7 +1437,7 @@ export default function Storefront() {
             <div className="mt-5 grid grid-cols-2 gap-2">
               <Button
                 variant="secondary"
-                disabled={selectedProduct.stock < 1}
+                disabled={selectedProduct.availability === "out_of_stock"}
                 onClick={() => {
                   addToCart(selectedProduct, selectedQuantity);
                   setSelectedProductId(null);
@@ -1421,7 +1446,7 @@ export default function Storefront() {
                 Add to cart
               </Button>
               <Button
-                disabled={selectedProduct.stock < 1 || !contactAvailable || !paymentReady}
+                disabled={selectedProduct.availability === "out_of_stock" || !contactAvailable || !paymentReady}
                 onClick={() => {
                   buyNow(selectedProduct, selectedQuantity);
                   setSelectedProductId(null);
@@ -1644,7 +1669,7 @@ export default function Storefront() {
                               <span className="min-w-4 text-center text-sm font-bold text-[#171B24]">{item.quantity}</span>
                               <button
                                 type="button"
-                                disabled={item.quantity >= item.stock}
+                                disabled={item.quantity >= 99}
                                 onClick={() => updateCartQuantity(item.id, item.quantity + 1)}
                                 aria-label={`Increase quantity for ${item.name}`}
                                 className="grid h-8 w-8 place-items-center rounded-full bg-white text-[#4A4F5C] shadow-sm disabled:opacity-40"

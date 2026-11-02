@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Link } from "react-router-dom";
 import {
   Activity,
@@ -7,14 +7,18 @@ import {
   Bot,
   Boxes,
   CreditCard,
+  Copy,
   LayoutDashboard,
   Package,
   Settings,
+  Share2,
   ShoppingBag,
   Users,
   X,
   Layers,
 } from "lucide-react";
+import { getSellerProfile } from "../../services/api";
+import { getStoreUrl } from "../../utils/slugify";
 
 const groups = [
   {
@@ -24,6 +28,8 @@ const groups = [
       { label: "Orders", path: "/orders", icon: ShoppingBag },
       { label: "Products", path: "/products", icon: Package },
       { label: "Inventory", path: "/inventory", icon: Boxes },
+      { label: "POS", path: "/pos", icon: CreditCard },
+      { label: "Sales History", path: "/sales-history", icon: ShoppingBag },
       { label: "Customers", path: "/customers", icon: Users },
     ],
   },
@@ -31,7 +37,7 @@ const groups = [
     label: "Grow",
     links: [
       { label: "Analytics", path: "/analytics", icon: BarChart3 },
-      { label: "AI Insights", path: "/ai-insights", icon: Bot, badge: "AI" },
+      { label: "Seller Insights", path: "/ai-insights", icon: Bot },
       { label: "Billing & Plan", path: "/billing", icon: CreditCard },
     ],
   },
@@ -39,6 +45,58 @@ const groups = [
 
 export default function AppSidebar({ open = false, onClose = () => {} }) {
   const sidebarRef = useRef(null);
+  const [seller, setSeller] = useState(null);
+  const [storeCopyState, setStoreCopyState] = useState("idle");
+
+  useEffect(() => {
+    let active = true;
+    getSellerProfile().then(({ seller: nextSeller }) => {
+      if (!active) return;
+      setSeller(nextSeller);
+    }).catch(() => {
+      if (active) setSeller(null);
+    });
+    return () => { active = false; };
+  }, []);
+
+  const storeUrl = seller?.storeSlug ? getStoreUrl(seller.storeSlug) : "";
+  const handleCopyStoreUrl = async () => {
+    if (!storeUrl) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(storeUrl);
+      } else {
+        const area = document.createElement("textarea");
+        area.value = storeUrl;
+        area.style.position = "fixed";
+        area.style.left = "-9999px";
+        document.body.appendChild(area);
+        area.select();
+        area.setSelectionRange(0, area.value.length);
+        document.execCommand("copy");
+        document.body.removeChild(area);
+      }
+      setStoreCopyState("copied");
+      window.setTimeout(() => setStoreCopyState("idle"), 1800);
+    } catch {
+      setStoreCopyState("failed");
+      window.setTimeout(() => setStoreCopyState("idle"), 2200);
+    }
+  };
+
+  const handleShareStoreUrl = async () => {
+    if (!storeUrl) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: seller?.businessName || "My Store", text: "Visit my store", url: storeUrl });
+        return;
+      }
+      await handleCopyStoreUrl();
+    } catch {
+      setStoreCopyState("failed");
+      window.setTimeout(() => setStoreCopyState("idle"), 2200);
+    }
+  };
 
   useEffect(() => {
     if (!open) return undefined;
@@ -133,6 +191,27 @@ export default function AppSidebar({ open = false, onClose = () => {} }) {
               </nav>
             </section>
           ))}
+          <section>
+            <h2 className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">My Store</h2>
+            <div className="space-y-2 rounded-[8px] border border-line bg-paper p-3">
+              {storeUrl ? (
+                <>
+                  <div className="min-w-0 rounded-[6px] bg-surface p-2 text-[10px] leading-relaxed text-muted break-all">{storeUrl}</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <a href={storeUrl} target="_blank" rel="noreferrer" onClick={onClose} className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-[5px] border border-line bg-surface px-2 text-[11px] font-semibold text-ink hover:bg-paper">View Store</a>
+                    <button type="button" onClick={handleShareStoreUrl} className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-[5px] border border-line bg-surface px-2 text-[11px] font-semibold text-ink hover:bg-paper"><Share2 size={13} aria-hidden="true" />Share</button>
+                    <button type="button" onClick={handleCopyStoreUrl} className="col-span-2 inline-flex min-h-9 items-center justify-center gap-1.5 rounded-[5px] border border-line bg-surface px-2 text-[11px] font-semibold text-ink hover:bg-paper"><Copy size={13} aria-hidden="true" />{storeCopyState === "copied" ? "Copied link" : storeCopyState === "failed" ? "Retry copy" : "Copy link"}</button>
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-muted">Complete onboarding to create your public storefront.</p>
+              )}
+              <NavLink to="/settings" onClick={onClose} className="mt-2 inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-[5px] border border-line bg-surface px-2 text-[11px] font-semibold text-ink hover:bg-paper">
+                <Settings size={14} strokeWidth={1.7} aria-hidden="true" />
+                Store Settings
+              </NavLink>
+            </div>
+          </section>
           <section>
             <h2 className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">Workspace</h2>
             <nav aria-label="Workspace preferences">

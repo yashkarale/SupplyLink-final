@@ -9,8 +9,10 @@ import sellerRoutes from "./routes/sellerRoutes.js";
 import productRoutes from "./routes/productRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
 import billingRoutes from "./routes/billingRoutes.js";
+import marketplaceRoutes from "./routes/marketplaceRoutes.js";
 import storeRoutes from "./routes/storeRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
+import adminRoutes from "./routes/adminRoutes.js";
 import { handleResendWebhook } from "./controllers/emailWebhookController.js";
 import { handleRazorpayWebhook } from "./controllers/billingController.js";
 
@@ -22,7 +24,13 @@ const clientOrigins = (process.env.CLIENT_URL || "http://localhost:5173")
   .filter(Boolean);
 
 app.disable("x-powered-by");
-app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use(helmet({
+  crossOriginResourcePolicy: false,
+  hsts: process.env.NODE_ENV === "production" ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
+  referrerPolicy: { policy: ["no-referrer"] },
+  frameguard: { action: "deny" },
+  noSniff: true,
+}));
 morgan.token("safe-url", (req) => {
   try {
     const url = new URL(req.originalUrl || req.url || "/", "http://localhost");
@@ -101,8 +109,10 @@ app.use("/api/sellers", sellerRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/billing", billingRoutes);
+app.use("/api/marketplace", marketplaceRoutes);
 app.use("/api/store", storeRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/admin", adminRoutes);
 app.post("/api/webhooks/resend", handleResendWebhook);
 app.post("/api/webhooks/razorpay", handleRazorpayWebhook);
 

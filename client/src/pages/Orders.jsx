@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
-import { AlertCircle, CheckCircle2, Eye, Search, ShoppingBag } from "lucide-react";
+import { AlertCircle, CheckCircle2, Eye, Search, ShoppingBag, ChevronLeft, ChevronRight } from "lucide-react";
 import PageHeader from "../components/ui/PageHeader";
 import StatusBadge from "../components/ui/StatusBadge";
 import EmptyState from "../components/ui/EmptyState";
@@ -52,28 +52,28 @@ export default function Orders() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [confirmingPaymentId, setConfirmingPaymentId] = useState("");
   const [updatingStatusId, setUpdatingStatusId] = useState("");
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
 
   const loadOrders = useCallback(async () => {
+    setLoading(true);
     setError("");
     try {
-      const response = await fetchOrders();
+      const response = await fetchOrders({ page, limit: 25, status: status === "All statuses" ? undefined : backendOrderStatusMap[status], search: search.trim() || undefined, fromDate: fromDate || undefined, toDate: toDate ? `${toDate}T23:59:59.999` : undefined });
       const list = Array.isArray(response) ? response : Array.isArray(response?.orders) ? response.orders : [];
       setOrders(list.map(normalizeOrder));
+      setPagination(response?.pagination || { page, totalPages: 1, total: list.length });
     } catch (err) { setError(err?.response?.data?.message || err?.message || "Unable to load orders."); }
     finally { setLoading(false); }
-  }, []);
+  }, [page, status, search, fromDate, toDate]);
   useEffect(() => {
-    let active = true;
-    fetchOrders()
-      .then((response) => {
-        if (active) setOrders((Array.isArray(response) ? response : Array.isArray(response?.orders) ? response.orders : []).map(normalizeOrder));
-      })
-      .catch((err) => { if (active) setError(err?.response?.data?.message || err?.message || "Unable to load orders."); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, []);
+    const timer = window.setTimeout(() => loadOrders(), 180);
+    return () => window.clearTimeout(timer);
+  }, [loadOrders]);
 
-  const filtered = useMemo(() => orders.filter((order) => `${order.reference} ${order.customer} ${order.email} ${order.phone}`.toLowerCase().includes(search.trim().toLowerCase()) && (status === "All statuses" || order.status === status)), [orders, search, status]);
+  const filtered = orders;
 
   const updateStatus = async (order, nextStatus) => {
     const backendStatus = backendOrderStatusMap[nextStatus];
@@ -119,12 +119,15 @@ export default function Orders() {
     <PageHeader title="Orders" description="Review customer orders, verify eligible payment proofs, and manage fulfillment." theme={theme}><span className="inline-flex min-h-10 items-center gap-2 rounded-[5px] border border-line bg-surface px-3 text-sm text-muted"><ShoppingBag size={15}/><strong className="text-ink">{loading ? "—" : orders.length}</strong><span>orders</span></span></PageHeader>
     {error && <div role="alert" className="flex flex-wrap items-center gap-2 rounded-[var(--radius-card)] border border-danger/30 bg-danger/5 p-3 text-sm text-danger"><AlertCircle size={16}/><span className="min-w-0 flex-1">{error}</span>{!loading && <button type="button" onClick={()=>{setLoading(true);loadOrders();}} className="min-h-10 shrink-0 underline underline-offset-2">Retry</button>}</div>}
     {successNotice && <div role="status" className="flex items-center gap-2 rounded-[var(--radius-card)] border border-success/30 bg-success/5 p-3 text-sm text-success"><CheckCircle2 size={16}/>{successNotice}</div>}
+    <div className="flex flex-wrap gap-3 rounded-[var(--radius-card)] border border-line bg-surface p-3"><label className="text-xs text-muted">From <input aria-label="Orders from date" type="date" value={fromDate} onChange={(e)=>{setFromDate(e.target.value);setPage(1);}} className={fieldClass}/></label><label className="text-xs text-muted">To <input aria-label="Orders to date" type="date" value={toDate} onChange={(e)=>{setToDate(e.target.value);setPage(1);}} className={fieldClass}/></label><span className="self-center text-xs text-muted">Search, status, and date filters run on the server.</span></div>
+    <div className="flex flex-wrap gap-3 rounded-[var(--radius-card)] border border-line bg-surface p-3"><label className="text-xs text-muted">From <input aria-label="Orders from date" type="date" value={fromDate} onChange={(e)=>{setFromDate(e.target.value);setPage(1);}} className={fieldClass}/></label><label className="text-xs text-muted">To <input aria-label="Orders to date" type="date" value={toDate} onChange={(e)=>{setToDate(e.target.value);setPage(1);}} className={fieldClass}/></label><span className="self-center text-xs text-muted">Search and status filters are applied on the server.</span></div>
     <section className="overflow-hidden rounded-[var(--radius-card)] border border-line bg-surface">
-      <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div><h2 className="font-semibold">Order management</h2><p className="mt-1 text-xs text-muted">{loading ? "Loading orders…" : `${filtered.length} of ${orders.length} orders`}</p></div><div className="grid min-w-0 gap-2 sm:flex"><label className="flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] border border-line bg-paper px-3"><Search size={15} className="shrink-0 text-muted"/><span className="sr-only">Search orders</span><input aria-label="Search orders" value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Order, customer, email, phone" className="h-10 min-w-0 bg-transparent text-sm outline-none placeholder:text-muted sm:w-64"/></label><label htmlFor="order-status-filter" className="sr-only">Filter by order status</label><select id="order-status-filter" value={status} onChange={(e)=>setStatus(e.target.value)} className={fieldClass}><option>All statuses</option>{statuses.map((value)=><option key={value}>{value}</option>)}</select></div></div>
+      <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div><h2 className="font-semibold">Order management</h2><p className="mt-1 text-xs text-muted">{loading ? "Loading orders…" : `${pagination.total} matching online orders`}</p></div><div className="grid min-w-0 gap-2 sm:flex"><label className="flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] border border-line bg-paper px-3"><Search size={15} className="shrink-0 text-muted"/><span className="sr-only">Search orders</span><input aria-label="Search orders" value={search} onChange={(e)=>{setSearch(e.target.value);setPage(1);}} placeholder="Order, customer, email, phone" className="h-10 min-w-0 bg-transparent text-sm outline-none placeholder:text-muted sm:w-64"/></label><label htmlFor="order-status-filter" className="sr-only">Filter by order status</label><select id="order-status-filter" value={status} onChange={(e)=>{setStatus(e.target.value);setPage(1);}} className={fieldClass}><option>All statuses</option>{statuses.map((value)=><option key={value}>{value}</option>)}</select></div></div>
       {loading ? <div className="space-y-4 p-5"><SkeletonLoader height={24} width="25%" theme={theme}/><SkeletonLoader height={112} width="100%" theme={theme}/><SkeletonLoader height={112} width="100%" theme={theme}/></div>
         : filtered.length === 0 ? <EmptyState title={error && !orders.length ? "Orders unavailable" : orders.length ? "No matching orders" : "No orders yet"} description={error && !orders.length ? "Retry loading to check for recent orders." : orders.length ? "Try a different search or status." : "New orders placed through your storefront will appear here."} icon={ShoppingBag}/>
         : <div className="divide-y divide-line">{filtered.map((order)=><OrderCard key={order.id || order.reference} order={order} onView={setSelectedOrder} onStatusChange={updateStatus} onProof={viewPaymentProof} onConfirm={confirmPayment} updatingStatusId={updatingStatusId} confirmingPaymentId={confirmingPaymentId}/>)}</div>}
     </section>
+    {!loading && pagination.totalPages > 1 && <div className="flex items-center justify-between rounded-[var(--radius-card)] border border-line bg-surface p-3"><button type="button" disabled={page<=1} onClick={()=>setPage((value)=>value-1)} className="inline-flex min-h-10 items-center gap-1 px-2 text-sm disabled:opacity-40"><ChevronLeft size={16}/>Previous</button><span className="text-xs text-muted">Page {page} of {pagination.totalPages} · {pagination.total} orders</span><button type="button" disabled={page>=pagination.totalPages} onClick={()=>setPage((value)=>value+1)} className="inline-flex min-h-10 items-center gap-1 px-2 text-sm disabled:opacity-40">Next<ChevronRight size={16}/></button></div>}
     <Modal isOpen={Boolean(selectedOrder)} onClose={()=>setSelectedOrder(null)} title={selectedOrder ? `Order ${selectedOrder.reference}` : "Order details"} maxWidth="max-w-2xl">
       {selectedOrder && <OrderDetails order={selectedOrder} onStatusChange={updateStatus} onProof={viewPaymentProof} onConfirm={confirmPayment} updating={updatingStatusId===selectedOrder.id} confirming={confirmingPaymentId===selectedOrder.id}/>}
     </Modal>

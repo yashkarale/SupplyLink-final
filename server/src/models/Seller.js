@@ -35,6 +35,12 @@ const sellerSchema = new mongoose.Schema(
       default: "",
       maxlength: 1200,
     },
+    businessAddress: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 300,
+    },
     phone: {
       type: String,
       default: "",
@@ -43,6 +49,90 @@ const sellerSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    country: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    state: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    city: {
+      type: String,
+      default: "",
+      trim: true,
+      index: true,
+    },
+    area: {
+      type: String,
+      default: "",
+      trim: true,
+      index: true,
+    },
+    locality: {
+      type: String,
+      default: "",
+      trim: true,
+      index: true,
+    },
+    sellerAddress: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    latitude: {
+      type: Number,
+      default: null,
+    },
+    longitude: {
+      type: Number,
+      default: null,
+    },
+    timezone: {
+      type: String,
+      default: "Asia/Kolkata",
+    },
+    pickupAvailable: {
+      type: Boolean,
+      default: false,
+    },
+    pickupInstructions: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    sellerDeliveryAvailable: {
+      type: Boolean,
+      default: false,
+    },
+    deliveryFeeType: {
+      type: String,
+      enum: ["flat", "distance", "custom", ""],
+      default: "",
+    },
+    deliveryAreas: [{
+      area: { type: String, trim: true, default: "" },
+      fee: { type: Number, default: 0, min: 0 },
+      minimumOrder: { type: Number, default: 0, min: 0 },
+    }],
+    deliveryTerms: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    openingHours: [{
+      day: {
+        type: String,
+        enum: ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"],
+      },
+      isClosed: { type: Boolean, default: false },
+      intervals: [{
+        open: { type: String, default: "" },
+        close: { type: String, default: "" },
+      }],
+    }],
     paymentQrUrl: { type: String, default: "" },
     paymentQrPublicId: { type: String, default: "", select: false },
     category: {
@@ -106,5 +196,8 @@ const sellerSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+sellerSchema.index({ isPublished: 1, status: 1, createdAt: -1 });
+sellerSchema.index({ isPublished: 1, status: 1, category: 1, createdAt: -1 });
 
 export default mongoose.model("Seller", sellerSchema);

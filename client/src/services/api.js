@@ -56,6 +56,17 @@ export const loginUser = async (payload) => {
   return response.data;
 };
 
+export const getCurrentUser = async () => {
+  const response = await api.get("/auth/me");
+  return response.data;
+};
+
+export const getAdminDashboard = async () => (await api.get("/admin/dashboard")).data;
+export const getAdminSellers = async (params = {}) => (await api.get("/admin/sellers", { params })).data;
+export const updateAdminSellerStatus = async (sellerId, status) => (await api.patch(`/admin/sellers/${encodeURIComponent(sellerId)}/status`, { status })).data;
+export const getAdminSubscriptions = async (params = {}) => (await api.get("/admin/subscriptions", { params })).data;
+export const getAdminAuditLogs = async (params = {}) => (await api.get("/admin/audit-logs", { params })).data;
+
 export const registerUser = async (payload) => {
   const response = await api.post("/auth/register", payload);
   return response.data;
@@ -88,13 +99,18 @@ export const uploadSellerPaymentQr = async (file) => {
   return response.data;
 };
 
-export const fetchDashboardSummary = async () => {
-  const response = await api.get("/sellers/dashboard");
+export const fetchDashboardSummary = async (params = {}) => {
+  const response = await api.get("/sellers/dashboard", { params });
   return response.data;
 };
 
-export const fetchSellerCustomers = async () => {
-  const response = await api.get("/sellers/customers");
+export const fetchSellerCustomers = async (params = {}) => {
+  const response = await api.get("/sellers/customers", { params });
+  return response.data;
+};
+
+export const fetchCustomerOrderHistory = async (identity, params = {}) => {
+  const response = await api.post("/sellers/customers/history", { identity, ...params });
   return response.data;
 };
 
@@ -136,6 +152,11 @@ export const updateInventory = async (productId, payload) => {
   return response.data;
 };
 
+export const fetchInventoryMovements = async (params = {}) => {
+  const response = await api.get("/products/inventory/movements", { params });
+  return response.data;
+};
+
 export const uploadProductImage = async (productId, file) => {
   const response = await api.post(`/products/${encodeURIComponent(productId)}/images`, file, {
     headers: { "Content-Type": file.type },
@@ -143,8 +164,18 @@ export const uploadProductImage = async (productId, file) => {
   return response.data;
 };
 
-export const fetchOrders = async () => {
-  const response = await api.get("/orders");
+export const fetchOrders = async (params = {}) => {
+  const response = await api.get("/orders", { params });
+  return response.data;
+};
+
+export const fetchPosSales = async (params = {}) => {
+  const response = await api.get("/orders/pos", { params });
+  return response.data;
+};
+
+export const createOfflinePosSale = async (payload) => {
+  const response = await api.post("/orders/pos", payload);
   return response.data;
 };
 
@@ -204,6 +235,108 @@ export const uploadPublicPaymentProof = async ({ slug, orderReference, token, fi
   return payload;
 };
 
+export const fetchMarketplaceProducts = async (page = 1, limit = 12, filters = {}) => {
+  const url = new URL(`${baseURL}/marketplace/products`);
+  url.searchParams.set("page", String(page || 1));
+  url.searchParams.set("limit", String(limit || 12));
+
+  for (const [key, value] of Object.entries(filters || {})) {
+    if (value === undefined || value === null || value === "") continue;
+    url.searchParams.set(key, String(value));
+  }
+
+  const response = await fetch(url.toString());
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload?.message || "Marketplace unavailable");
+  }
+
+  return payload;
+};
+
+export const fetchPopularMarketplaceProducts = async (limit = 8, filters = {}) => {
+  const url = new URL(`${baseURL}/marketplace/products/popular`);
+  url.searchParams.set("limit", String(limit || 8));
+  for (const [key, value] of Object.entries(filters || {})) {
+    if (value === undefined || value === null || value === "") continue;
+    url.searchParams.set(key, String(value));
+  }
+  const response = await fetch(url.toString());
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload?.message || "Unable to load popular products.");
+  return payload;
+};
+
+export const fetchRelatedMarketplaceProducts = async (sellerSlug, productSlug, limit = 4) => {
+  const url = `${baseURL}/marketplace/products/${encodeURIComponent(sellerSlug)}/${encodeURIComponent(productSlug)}/related?limit=${encodeURIComponent(limit)}`;
+  const response = await fetch(url);
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload?.message || "Unable to load related products.");
+  return payload;
+};
+
+export const fetchMarketplaceProductBySlug = async (slug, sellerSlug) => {
+  const safeSlug = String(slug || "").trim();
+  const safeSellerSlug = String(sellerSlug || "").trim();
+  const url = safeSellerSlug
+    ? `${baseURL}/marketplace/products/${encodeURIComponent(safeSellerSlug)}/${encodeURIComponent(safeSlug)}`
+    : `${baseURL}/marketplace/products/${encodeURIComponent(safeSlug)}`;
+
+  const response = await fetch(url);
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload?.message || "Product unavailable");
+  }
+
+  return payload;
+};
+
+export const fetchMarketplaceSellers = async (page = 1, limit = 12, filters = {}) => {
+  const url = new URL(`${baseURL}/marketplace/sellers`);
+  url.searchParams.set("page", String(page || 1));
+  url.searchParams.set("limit", String(limit || 12));
+
+  for (const [key, value] of Object.entries(filters || {})) {
+    if (value === undefined || value === null || value === "") continue;
+    url.searchParams.set(key, String(value));
+  }
+
+  const response = await fetch(url.toString());
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload?.message || "Marketplace sellers unavailable");
+  }
+
+  return payload;
+};
+
+export const fetchMarketplaceCategories = async (filters = {}) => {
+  const url = new URL(`${baseURL}/marketplace/categories`);
+  for (const [key, value] of Object.entries(filters || {})) {
+    if (value === undefined || value === null || value === "") continue;
+    url.searchParams.set(key, String(value));
+  }
+  const response = await fetch(url.toString());
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload?.message || "Categories unavailable");
+  return payload;
+};
+
+export const fetchMarketplaceLocalities = async (filters = {}) => {
+  const url = new URL(`${baseURL}/marketplace/localities`);
+  for (const [key, value] of Object.entries(filters || {})) {
+    if (value === undefined || value === null || value === "") continue;
+    url.searchParams.set(key, String(value));
+  }
+  const response = await fetch(url.toString());
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload?.message || "Localities unavailable");
+  return payload;
+};
+
 export const fetchPublicStore = async (slug) => {
   const canonicalSlug = slugify(slug || "mystore");
   const response = await fetch(`${baseURL}/store/${encodeURIComponent(canonicalSlug)}`);
@@ -250,33 +383,8 @@ export const verifySubscriptionPayment = async (payload) => {
 };
 
 export const fetchAiInsights = async () => {
-  const mlBaseUrl = import.meta.env.VITE_ML_URL;
-  if (!mlBaseUrl) {
-    return {
-      summary: { forecast: "Unavailable", inventoryHealth: "Unavailable", customerPulse: "Unavailable" },
-      modules: [],
-      connected: false,
-    };
-  }
-
-  try {
-    const response = await fetch(`${mlBaseUrl}/insights`);
-    if (!response.ok) {
-      throw new Error("ML service unavailable");
-    }
-
-    return await response.json();
-  } catch {
-    return {
-      summary: {
-        forecast: "Unavailable",
-        inventoryHealth: "Unavailable",
-        customerPulse: "Unavailable",
-      },
-      modules: [],
-      connected: false,
-    };
-  }
+  const response = await api.get("/sellers/insights");
+  return response.data;
 };
 
 export const fetchNotifications = async (params = {}) => {

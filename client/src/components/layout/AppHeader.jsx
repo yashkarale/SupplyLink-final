@@ -583,7 +583,7 @@ export default function AppHeader({
                 requestAnimationFrame(() => searchRef.current?.focus());
               }}
               aria-label="Search workspace"
-              className={`flex h-9 items-center gap-2 rounded-[5px] border px-3 text-xs ${controlClass}`}
+              className={`flex h-9 w-full min-w-0 items-center gap-2 overflow-hidden rounded-[5px] border px-3 text-xs ${controlClass}`}
             >
               <Search size={15} className={mutedClass} />
               <span className={`truncate ${mutedClass}`}>Search workspace...</span>

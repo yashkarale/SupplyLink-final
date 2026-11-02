@@ -25,6 +25,7 @@ export default function Products() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [updatingProductId, setUpdatingProductId] = useState("");
+  const [stockUpdatingId, setStockUpdatingId] = useState("");
   const [form, setForm] = useState({ name: "", category: "Apparel", price: "", stock: "" });
   const [error, setError] = useState("");
   const [successNotice, setSuccessNotice] = useState("");
@@ -98,13 +99,17 @@ export default function Products() {
   };
 
   const updateStock = async (productId, delta) => {
+    const currentProduct = products.find((product) => product.id === productId);
+    if (!currentProduct || stockUpdatingId) return;
+    setStockUpdatingId(productId);
     try {
       setError("");
-      const response = await updateInventory(productId, { delta });
+      const response = await updateInventory(productId, { stock: Math.max(0, currentProduct.stock + delta), reason: "Product list stock adjustment" });
       if (!response?.product) return;
       const updated = normalizeProduct(response.product);
       setProducts((current) => current.map((p) => p.id === productId ? updated : p));
     } catch (err) { setError(err?.response?.data?.message || err?.message || "Unable to update inventory."); }
+    finally { setStockUpdatingId(""); }
   };
 
   const toggleProductArchive = async (product) => {
@@ -178,4 +183,4 @@ export default function Products() {
 
 function ProductIdentity({product}) { return <div className="flex min-w-0 items-center gap-3">{product.images[0] ? <img src={product.images[0]} alt="" className="size-11 shrink-0 rounded-[var(--radius-control)] border border-[var(--line)] object-cover"/> : <span className="flex size-11 shrink-0 items-center justify-center border border-[var(--line)] bg-[var(--paper)] text-xs font-semibold text-[var(--muted)]">{product.name.slice(0,2).toUpperCase()}</span>}<div className="min-w-0"><p className="truncate text-sm font-semibold" title={product.name}>{product.name}</p><p className="mt-0.5 truncate text-xs text-[var(--muted)]">{product.id}</p></div></div>; }
 function ProductState({product}) { const state = product.stock === 0 ? "Out of stock" : product.status === "draft" ? "Draft" : product.status === "archived" ? "Archived" : "Published"; return <StatusBadge status={state}/>; }
-function StockStepper({product,onChange}) { return <div className="flex shrink-0 items-center gap-2"><button type="button" disabled={product.stock <= 0} onClick={()=>onChange(product.id,-1)} className="flex size-9 items-center justify-center rounded-[var(--radius-control)] border border-[var(--line)] bg-[var(--surface)] hover:bg-[var(--paper)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]" aria-label={`Decrease stock for ${product.name}`}><Minus size={14}/></button><span className="min-w-8 text-center text-sm font-semibold" aria-label={`${product.stock} in stock`}>{product.stock}</span><button type="button" onClick={()=>onChange(product.id,1)} className="flex size-9 items-center justify-center rounded-[var(--radius-control)] border border-[var(--line)] bg-[var(--surface)] hover:bg-[var(--paper)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]" aria-label={`Increase stock for ${product.name}`}><Plus size={14}/></button></div>; }
+function StockStepper({product,onChange,disabled=false}) { return <div className="flex shrink-0 items-center gap-2"><button type="button" disabled={disabled || product.stock <= 0} onClick={()=>onChange(product.id,-1)} className="flex size-9 items-center justify-center rounded-[var(--radius-control)] border border-[var(--line)] bg-[var(--surface)] hover:bg-[var(--paper)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]" aria-label={`Decrease stock for ${product.name}`}><Minus size={14}/></button><span className="min-w-8 text-center text-sm font-semibold" aria-label={`${product.stock} in stock`}>{product.stock}</span><button type="button" disabled={disabled} onClick={()=>onChange(product.id,1)} className="flex size-9 items-center justify-center rounded-[var(--radius-control)] border border-[var(--line)] bg-[var(--surface)] hover:bg-[var(--paper)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-color)]" aria-label={`Increase stock for ${product.name}`}><Plus size={14}/></button></div>; }

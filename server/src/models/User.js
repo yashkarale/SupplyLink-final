@@ -16,6 +16,12 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true
     },
+    phone: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 16,
+    },
     emailVerified: {
       type: Boolean,
       // Legacy accounts remain usable; new registrations explicitly set false.
@@ -39,7 +45,7 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["seller", "admin"],
+      enum: ["customer", "seller", "admin"],
       default: "seller"
     }
   },

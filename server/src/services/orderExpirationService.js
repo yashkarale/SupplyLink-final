@@ -1,9 +1,9 @@
 import mongoose from "mongoose";
 import Order from "../models/Order.js";
-import Product from "../models/Product.js";
 import Seller from "../models/Seller.js";
 import { publishStoreEvent } from "../utils/storeEvents.js";
 import { destroyCloudinaryImage } from "./mediaStorage.js";
+import { restoreStock } from "./inventoryService.js";
 
 export const expireUnpaidWhatsAppOrders = async ({ now = new Date(), batchSize = 50 } = {}) => {
   const expired = await Order.find({
@@ -27,13 +27,25 @@ export const expireUnpaidWhatsAppOrders = async ({ now = new Date(), batchSize =
           paymentPendingUntil: { $lte: now },
         }).session(session);
         if (!order) return;
-        for (const item of order.items) {
-          const result = await Product.updateOne(
-            { _id: item.productId, sellerId: order.sellerId },
-            { $inc: { stock: Number(item.quantity || 0) } },
-            { session },
-          );
-          if (result.matchedCount !== 1) throw new Error("Cannot release stock for an expired order product.");
+        const quantities = new Map();
+        for (const item of order.items || []) {
+          const productId = String(item.productId || "");
+          const quantity = Number(item.quantity || 0);
+          if (!productId || !Number.isSafeInteger(quantity) || quantity < 1) throw new Error("Expired order inventory line is invalid.");
+          quantities.set(productId, (quantities.get(productId) || 0) + quantity);
+        }
+        for (const [productId, quantity] of quantities) {
+          const result = await restoreStock({
+            sellerId: order.sellerId,
+            productId,
+            quantity,
+            reason: "Expired pending order",
+            referenceId: order.orderReference,
+            movementType: "ORDER_CANCELLED",
+            idempotencyKey: `${order.orderReference}:${productId}:expired`,
+            session,
+          });
+          if (result.duplicate || !result.product) throw new Error("Cannot release stock for an expired order product.");
         }
         order.orderStatus = "CANCELLED";
         order.paymentStatus = "FAILED";

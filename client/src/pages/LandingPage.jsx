@@ -71,6 +71,8 @@ export default function LandingPage() {
         </div>
 
         <nav className="landing-nav">
+          <Link to="/marketplace">Shop local</Link>
+          <Link to="/shops">Find shops</Link>
           <a href="#features">Features</a>
           <a href="#pricing">Pricing</a>
           <a href="#insights">AI</a>

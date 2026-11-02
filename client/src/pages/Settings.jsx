@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
-import { Check, ExternalLink, LogOut, QrCode, ShieldCheck, Store, Upload, UserRound } from "lucide-react";
+import { Check, Copy, ExternalLink, LogOut, QrCode, ShieldCheck, Store, Upload, UserRound, Share2 } from "lucide-react";
 import PageHeader from "../components/ui/PageHeader";
 import Button from "../components/ui/Button";
 import { getSellerProfile, revokeCurrentSession, setAuthToken, updateSellerStoreSettings, uploadSellerPaymentQr } from "../services/api";
@@ -10,8 +10,8 @@ const fieldClass = "mt-1.5 w-full min-w-0 border border-[#e2dccf] bg-[#fffdf9] p
 const panelClass = "min-w-0 border border-[#e2dccf] bg-[#fffdf9] p-4 text-[#1c1a17] sm:p-6";
 const labelClass = "block text-sm font-semibold text-[#1c1a17]";
 const muted = "text-[#6f685d]";
-const editableFields = ["businessName", "storeSlug", "description", "whatsapp"];
-const snapshot = (seller) => Object.fromEntries(editableFields.map((key) => [key, seller?.[key] || ""]));
+const editableFields = ["businessName", "storeSlug", "description", "whatsapp", "phone", "category", "country", "state", "city", "area", "locality", "businessAddress", "pickupInstructions", "pickupAvailable", "sellerDeliveryAvailable", "deliveryFeeType", "deliveryTerms", "deliveryAreas", "openingHours", "isPublished"];
+const snapshot = (seller) => Object.fromEntries(editableFields.map((key) => [key, Array.isArray(seller?.[key]) ? structuredClone(seller[key]) : (seller?.[key] ?? (typeof seller?.[key] === "boolean" ? false : ""))]));
 
 export default function Settings() {
   const { theme = "light" } = useOutletContext() || {};
@@ -26,8 +26,10 @@ export default function Settings() {
   const [qrError, setQrError] = useState("");
   const [qrSaved, setQrSaved] = useState(false);
   const [pendingQrFile, setPendingQrFile] = useState(null);
+  const [copyState, setCopyState] = useState("idle");
+  const [shareState, setShareState] = useState("idle");
 
-  const dirty = useMemo(() => Boolean(profile && original && (pendingQrFile || editableFields.some((key) => (profile[key] || "") !== (original[key] || "")))), [profile, original, pendingQrFile]);
+  const dirty = useMemo(() => Boolean(profile && original && (pendingQrFile || editableFields.some((key) => JSON.stringify(profile[key] ?? "") !== JSON.stringify(original[key] ?? "")))), [profile, original, pendingQrFile]);
 
   useEffect(() => {
     let active = true;
@@ -117,6 +119,49 @@ export default function Settings() {
   const storeUrl = getStoreUrl(profile?.storeSlug);
   const navItems = [{ id: "store-profile", label: "Store profile", Icon: Store }, { id: "account", label: "Account", Icon: UserRound }, { id: "session", label: "Session", Icon: ShieldCheck }];
 
+  const handleCopyStoreUrl = async () => {
+    if (!storeUrl) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(storeUrl);
+      } else {
+        const area = document.createElement("textarea");
+        area.value = storeUrl;
+        area.setAttribute("readonly", "");
+        area.style.position = "fixed";
+        area.style.left = "-9999px";
+        document.body.appendChild(area);
+        area.select();
+        area.setSelectionRange(0, area.value.length);
+        document.execCommand("copy");
+        document.body.removeChild(area);
+      }
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 1800);
+    } catch {
+      setCopyState("failed");
+      window.setTimeout(() => setCopyState("idle"), 2200);
+    }
+  };
+
+  const handleShareStoreUrl = async () => {
+    if (!storeUrl) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: profile?.businessName || "My Store", text: "Visit my storefront", url: storeUrl });
+        setShareState("shared");
+        window.setTimeout(() => setShareState("idle"), 1800);
+        return;
+      }
+      await handleCopyStoreUrl();
+      setShareState("copied");
+      window.setTimeout(() => setShareState("idle"), 1800);
+    } catch {
+      setShareState("failed");
+      window.setTimeout(() => setShareState("idle"), 2200);
+    }
+  };
+
   return <div className="settings-page space-y-6">
     <PageHeader title="Settings" description="Manage the public details and seller account connected to your store." theme={theme} />
     {loading ? <div className={`${panelClass} text-sm ${muted}`} role="status">Loading current settings…</div>
@@ -137,8 +182,35 @@ export default function Settings() {
               </div>
 
               <div className="mt-5 border-t border-[#e2dccf] pt-5">
-                <h3 className="text-sm font-semibold">Public storefront</h3><p className={`mt-1 text-xs ${muted}`}>Customers can browse your published catalog at this address.</p>
-                <div className="mt-3 flex min-w-0 flex-col gap-3 border border-[#e2dccf] bg-[#f7f4ee] p-3 sm:flex-row sm:items-center sm:justify-between"><p className="min-w-0 break-all text-sm">{storeUrl || "A URL will appear when your store slug is set."}</p><a href={storeUrl || undefined} target="_blank" rel="noreferrer" aria-disabled={!storeUrl} onClick={(e) => { if (!storeUrl) e.preventDefault(); }} className="inline-flex min-h-9 shrink-0 items-center justify-center gap-2 border border-[#e2dccf] bg-[#fffdf9] px-3 text-sm font-semibold hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d98a1f] aria-disabled:cursor-not-allowed aria-disabled:opacity-50">View store <ExternalLink size={14} aria-hidden="true" /></a></div>
+                <h3 className="text-sm font-semibold">Business details</h3><p className={`mt-1 text-xs ${muted}`}>The business address is public. Private pickup instructions are only visible in your seller workspace.</p>
+                <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  {[['category','Category'],['phone','Business phone'],['country','Country'],['state','State / region'],['city','City'],['area','Area'],['locality','Locality']].map(([key,label]) => <div key={key}><label className={labelClass} htmlFor={`business-${key}`}>{label}</label><input id={`business-${key}`} maxLength={key === 'category' ? 80 : 120} value={profile?.[key] || ''} onChange={(event) => change(key, event.target.value)} className={fieldClass} /></div>)}
+                  <div className="sm:col-span-2"><label className={labelClass} htmlFor="business-address">Public business address</label><textarea id="business-address" maxLength={300} rows={2} value={profile?.businessAddress || ''} onChange={(event) => change('businessAddress', event.target.value)} className={fieldClass} /></div>
+                  <div className="sm:col-span-2"><label className={labelClass} htmlFor="pickup-instructions">Private pickup instructions</label><textarea id="pickup-instructions" maxLength={500} rows={2} value={profile?.pickupInstructions || ''} onChange={(event) => change('pickupInstructions', event.target.value)} className={fieldClass} /><p className={`mt-1 text-xs ${muted}`}>These instructions are not included in public marketplace responses. Confirm exact pickup details with each customer.</p></div>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {[["pickupAvailable", "Offer customer pickup"], ["sellerDeliveryAvailable", "Offer seller delivery"]].map(([key,label]) => <label key={key} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(profile?.[key])} onChange={(event) => change(key, event.target.checked)} className="h-4 w-4 accent-[#17151a]" />{label}</label>)}
+                </div>
+                {profile?.sellerDeliveryAvailable && <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div><label className={labelClass} htmlFor="delivery-fee-type">Delivery fee type</label><select id="delivery-fee-type" value={profile?.deliveryFeeType || ''} onChange={(event) => change('deliveryFeeType', event.target.value)} className={fieldClass}><option value="">Not specified</option><option value="flat">Flat</option><option value="distance">Distance based</option><option value="custom">Custom</option></select></div>
+                  <div className="sm:col-span-2"><label className={labelClass} htmlFor="delivery-terms">Delivery terms</label><textarea id="delivery-terms" maxLength={1000} rows={2} value={profile?.deliveryTerms || ''} onChange={(event) => change('deliveryTerms', event.target.value)} className={fieldClass} /></div>
+                  <div className="sm:col-span-2"><p className={`${labelClass} mb-2`}>Delivery areas</p>{(profile?.deliveryAreas || []).map((entry, index) => <div key={`delivery-${index}`} className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_120px_140px_auto]"><input aria-label={`Delivery area ${index + 1}`} value={entry.area} maxLength={120} onChange={(event) => change('deliveryAreas', profile.deliveryAreas.map((area, i) => i === index ? {...area, area: event.target.value} : area))} placeholder="Area" className={fieldClass} /><input aria-label={`Delivery fee ${index + 1}`} type="number" min="0" step="0.01" value={entry.fee} onChange={(event) => change('deliveryAreas', profile.deliveryAreas.map((area, i) => i === index ? {...area, fee: event.target.value} : area))} placeholder="Fee" className={fieldClass} /><input aria-label={`Minimum order ${index + 1}`} type="number" min="0" step="0.01" value={entry.minimumOrder} onChange={(event) => change('deliveryAreas', profile.deliveryAreas.map((area, i) => i === index ? {...area, minimumOrder: event.target.value} : area))} placeholder="Minimum order" className={fieldClass} /><button type="button" onClick={() => change('deliveryAreas', profile.deliveryAreas.filter((_, i) => i !== index))} className="px-2 text-sm underline">Remove</button></div>)}<button type="button" disabled={(profile?.deliveryAreas || []).length >= 30} onClick={() => change('deliveryAreas', [...(profile?.deliveryAreas || []), {area:'',fee:0,minimumOrder:0}])} className="mt-1 text-sm font-semibold underline disabled:opacity-50">Add delivery area</button></div>
+                </div>}
+                <div className="mt-4"><p className={`${labelClass} mb-2`}>Business hours</p>{["MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY","SUNDAY"].map((day) => { const hours = (profile?.openingHours || []).find((entry) => entry.day === day) || {day,isClosed:true,intervals:[]}; return <div key={day} className="mb-2 grid grid-cols-1 items-center gap-2 sm:grid-cols-[120px_100px_1fr_1fr]"><span className="text-sm">{day[0] + day.slice(1).toLowerCase()}</span><label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={Boolean(hours.isClosed)} onChange={(event) => { const next=(profile?.openingHours || []).filter((entry) => entry.day !== day); next.push({...hours,isClosed:event.target.checked,intervals:event.target.checked?[]:(hours.intervals.length?hours.intervals:[{open:'09:00',close:'17:00'}])}); change('openingHours',next); }} />Closed</label>{!hours.isClosed && <><input aria-label={`${day} opens`} type="time" value={hours.intervals?.[0]?.open || '09:00'} onChange={(event) => { const next=(profile?.openingHours || []).filter((entry) => entry.day !== day); next.push({...hours,intervals:[{open:event.target.value,close:hours.intervals?.[0]?.close || '17:00'}]}); change('openingHours',next); }} className={fieldClass} /><input aria-label={`${day} closes`} type="time" value={hours.intervals?.[0]?.close || '17:00'} onChange={(event) => { const next=(profile?.openingHours || []).filter((entry) => entry.day !== day); next.push({...hours,intervals:[{open:hours.intervals?.[0]?.open || '09:00',close:event.target.value}]}); change('openingHours',next); }} className={fieldClass} /></>}</div>; })}</div>
+              </div>
+
+              <div className="mt-5 border-t border-[#e2dccf] pt-5">
+                <h3 className="text-sm font-semibold">My Store</h3><p className={`mt-1 text-xs ${muted}`}>Customers can browse your published catalog at this address.</p>
+                <div className="mt-3 flex min-w-0 flex-col gap-3 border border-[#e2dccf] bg-[#f7f4ee] p-3 sm:flex-row sm:items-center sm:justify-between"><p className="min-w-0 break-all text-sm">{storeUrl || "A URL will appear when your store slug is set."}</p><div className="flex flex-wrap gap-2"><button type="button" onClick={handleCopyStoreUrl} className="inline-flex min-h-9 shrink-0 items-center justify-center gap-2 border border-[#e2dccf] bg-[#fffdf9] px-3 text-sm font-semibold hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d98a1f]"><Copy size={14} aria-hidden="true" />{copyState === "copied" ? "Copied" : copyState === "failed" ? "Retry" : "Copy link"}</button><button type="button" onClick={handleShareStoreUrl} className="inline-flex min-h-9 shrink-0 items-center justify-center gap-2 border border-[#e2dccf] bg-[#fffdf9] px-3 text-sm font-semibold hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d98a1f]"><Share2 size={14} aria-hidden="true" />{shareState === "shared" ? "Shared" : shareState === "copied" ? "Link copied" : shareState === "failed" ? "Manual share" : "Share store"}</button><a href={storeUrl || undefined} target="_blank" rel="noreferrer" aria-disabled={!storeUrl} onClick={(e) => { if (!storeUrl) e.preventDefault(); }} className="inline-flex min-h-9 shrink-0 items-center justify-center gap-2 border border-[#e2dccf] bg-[#fffdf9] px-3 text-sm font-semibold hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d98a1f] aria-disabled:cursor-not-allowed aria-disabled:opacity-50">View store <ExternalLink size={14} aria-hidden="true" /></a></div></div>
+              </div>
+
+              <div className="mt-5 border-t border-[#e2dccf] pt-5">
+                <h3 className="text-sm font-semibold">Store visibility</h3>
+                <label className="mt-3 flex items-center justify-between gap-3 rounded-[12px] border border-[#e2dccf] bg-[#f7f4ee] p-3 text-sm font-medium text-[#1c1a17]">
+                  <span>Publish storefront</span>
+                  <input type="checkbox" checked={Boolean(profile?.isPublished)} onChange={(event) => change("isPublished", event.target.checked)} className="h-4 w-4 accent-[#17151a]" />
+                </label>
+                <p className={`mt-2 text-xs ${muted}`}>Draft stores stay hidden from public discovery until you publish them here.</p>
               </div>
 
               <div className="mt-5 border-t border-[#e2dccf] pt-5">

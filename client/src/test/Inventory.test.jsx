@@ -3,12 +3,13 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import Inventory from "../pages/Inventory";
 
-const { fetchProducts, updateInventory } = vi.hoisted(() => ({
+const { fetchProducts, updateInventory, fetchInventoryMovements } = vi.hoisted(() => ({
   fetchProducts: vi.fn(),
   updateInventory: vi.fn(),
+  fetchInventoryMovements: vi.fn(),
 }));
 
-vi.mock("../services/api", () => ({ fetchProducts, updateInventory }));
+vi.mock("../services/api", () => ({ fetchProducts, updateInventory, fetchInventoryMovements }));
 
 const products = [
   { _id: "product-1", name: "Linen Shirt", category: "Apparel", price: 1200, stock: 4 },
@@ -31,6 +32,7 @@ describe("Inventory", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fetchProducts.mockResolvedValue({ products });
+    fetchInventoryMovements.mockResolvedValue({ movements: [], pagination: { page: 1, totalPages: 1, total: 0 } });
   });
 
   it("filters inventory rows by search text", async () => {
@@ -60,7 +62,7 @@ describe("Inventory", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save quantity" }));
 
     await waitFor(() => expect(updateInventory).toHaveBeenCalledTimes(1));
-    expect(updateInventory).toHaveBeenCalledWith("product-2", { stock: 0 });
+    expect(updateInventory).toHaveBeenCalledWith("product-2", { stock: 0, reason: "Seller counted stock" });
     expect(await screen.findByText(/updated to 0/i)).toBeInTheDocument();
   });
 });

@@ -11,6 +11,7 @@ import { isDatabaseWriteLimitReached } from '../utils/storageUsage.js';
 import { getProductLimitForSeller } from '../utils/planEntitlements.js';
 import { createPrivateImageDownloadUrl, destroyCloudinaryImage, inspectUploadedImage, uploadImageToCloudinary } from '../services/mediaStorage.js';
 import { createNotification } from './notificationController.js';
+import { deductStock, restoreStock } from '../services/inventoryService.js';
 
 const isPaymentProofStorageConfigured = () => Boolean(
   process.env.API_PUBLIC_URL && process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET,
@@ -66,6 +67,29 @@ export const validateOrderStatusTransition = (currentStatus, nextStatus) => {
 
 const generateOrderReference = () =>
   `SL-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+
+const restoreOrderInventory = async ({ order, sellerId, reason, movementType, idempotencySuffix, session }) => {
+  const quantities = new Map();
+  for (const item of order.items || []) {
+    const productId = String(item.productId || "");
+    const quantity = Number(item.quantity || 0);
+    if (!productId || !Number.isSafeInteger(quantity) || quantity < 1) throw new Error("Order inventory line is invalid; stock was not restored.");
+    quantities.set(productId, (quantities.get(productId) || 0) + quantity);
+  }
+  for (const [productId, quantity] of quantities) {
+    const result = await restoreStock({
+      sellerId,
+      productId,
+      quantity,
+      reason,
+      referenceId: order.orderReference,
+      movementType,
+      idempotencyKey: `${order.orderReference}:${productId}:${idempotencySuffix}`,
+      session,
+    });
+    if (result.duplicate || !result.product) throw new Error(`Order inventory restoration was rejected for product ${productId}.`);
+  }
+};
 
 const deriveOrderSecret = (purpose, sellerId, requestId) => crypto
   .createHash("sha256")
@@ -133,6 +157,307 @@ const normalizePaymentMethod = (paymentMethod) => {
   return value;
 };
 
+const normalizeOfflinePaymentMethod = (paymentMethod) => {
+  const value = String(paymentMethod || 'CASH').trim().toUpperCase();
+  const allowed = ['CASH', 'UPI', 'CARD', 'OTHER'];
+
+  if (!allowed.includes(value)) {
+    throw new Error('Unsupported payment method');
+  }
+
+  return value;
+};
+
+const normalizeOptionalCustomer = (customer) => {
+  if (!customer || Object.values(customer).every((value) => String(value ?? '').trim() === '')) {
+    return null;
+  }
+
+  const payload = customer || {};
+  const name = String(payload.name || '').trim();
+  const phone = String(payload.phone || '').trim();
+  const email = String(payload.email || '').trim();
+  const city = String(payload.city || '').trim();
+  const postalCode = String(payload.postalCode || '').trim();
+  const address = String(payload.address || '').trim();
+  const notes = String(payload.notes || '').trim();
+
+  if (name.length > 120 || phone.length > 32 || address.length > 500 || email.length > 254 || city.length > 120 || postalCode.length > 20) {
+    throw new Error('Customer details exceed the allowed length');
+  }
+
+  if (phone && !/^[+0-9() .-]{8,24}$/.test(phone)) {
+    throw new Error('Enter a valid phone number');
+  }
+
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error('Enter a valid email address');
+  }
+
+  if (postalCode && !/^\d{6}$/.test(postalCode)) {
+    throw new Error('Enter a valid 6-digit postal PIN code');
+  }
+
+  return {
+    name,
+    phone,
+    email,
+    city,
+    postalCode,
+    address,
+    notes,
+  };
+};
+
+export const createOfflinePosSale = async (req, res) => {
+  try {
+    const requestId = String(req.body?.requestId || '').trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+      return res.status(400).json({ success: false, message: 'A valid POS requestId is required.' });
+    }
+
+    const duplicateOrder = await Order.findOne({ sellerId: req.user.userId, clientRequestId: requestId, orderType: 'OFFLINE_POS' }).lean();
+    if (duplicateOrder) {
+      return res.status(200).json({
+        success: true,
+        message: 'This POS sale was already recorded.',
+        sale: {
+          _id: duplicateOrder._id,
+          orderReference: duplicateOrder.orderReference,
+          orderStatus: duplicateOrder.orderStatus,
+          totalAmount: duplicateOrder.totalAmount,
+          paymentMethod: duplicateOrder.paymentMethod,
+          createdAt: duplicateOrder.createdAt,
+        },
+        idempotent: true,
+      });
+    }
+
+    const paymentMethod = normalizeOfflinePaymentMethod(req.body?.paymentMethod);
+    const customer = normalizeOptionalCustomer(req.body?.customer);
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+
+    if (items.length === 0) {
+      return res.status(400).json({ success: false, message: 'Add at least one product to the POS cart.' });
+    }
+    if (items.length > 25) {
+      return res.status(400).json({ success: false, message: 'A POS sale can contain at most 25 products.' });
+    }
+
+    const productIds = [...new Set(items.map((item) => String(item.productId || '')).filter(Boolean))];
+    const products = await Product.find({ _id: { $in: productIds }, sellerId: req.user.userId, status: { $ne: "archived" } }).lean();
+    if (products.length !== productIds.length) {
+      return res.status(404).json({ success: false, message: 'One or more products are unavailable for this seller.' });
+    }
+
+    const productMap = new Map(products.map((product) => [String(product._id), product]));
+    const snapshotItems = [];
+    const stockUpdateQueue = new Map();
+    let subtotal = 0;
+
+    for (const item of items) {
+      const productId = String(item.productId || '');
+      const product = productMap.get(productId);
+      const quantity = Number(item.quantity ?? 0);
+
+      if (!product) {
+        return res.status(404).json({ success: false, message: 'One or more products are unavailable for this seller.' });
+      }
+      if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 10_000_000) {
+        return res.status(400).json({ success: false, message: `Invalid quantity for ${product.name}.` });
+      }
+      if (Number(product.stock || 0) < quantity) {
+        return res.status(400).json({ success: false, message: `Insufficient stock for ${product.name}.` });
+      }
+
+      const unitPrice = Number(product.price ?? 0);
+      if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+        return res.status(400).json({ success: false, message: `Invalid price for ${product.name}.` });
+      }
+
+      const lineTotal = unitPrice * quantity;
+      subtotal += lineTotal;
+      stockUpdateQueue.set(productId, (stockUpdateQueue.get(productId) || 0) + quantity);
+      snapshotItems.push({
+        productId: product._id,
+        name: product.name,
+        variant: item.variant ? String(item.variant) : null,
+        unitPrice,
+        quantity,
+        lineTotal,
+      });
+    }
+
+    const totalAmount = Math.max(0, subtotal);
+    const session = await mongoose.startSession();
+
+    try {
+      let createdSale;
+      await session.withTransaction(async () => {
+        for (const [productId, quantity] of stockUpdateQueue) {
+          const result = await deductStock({
+            sellerId: req.user.userId,
+            productId,
+            quantity,
+            reason: 'Offline POS sale',
+            referenceId: requestId,
+            movementType: 'SALE',
+            idempotencyKey: `${requestId}:${productId}:offline`,
+            session,
+          });
+
+          if (result.duplicate) {
+            const stockError = new Error('This POS request has already consumed stock.');
+            stockError.status = 409;
+            throw stockError;
+          }
+        }
+
+        const [persistedSale] = await Order.create([{
+          sellerId: req.user.userId,
+          clientRequestId: requestId,
+          orderReference: generateOrderReference(),
+          orderType: 'OFFLINE_POS',
+          customer: customer || {
+            name: '',
+            phone: '',
+            email: '',
+            city: '',
+            postalCode: '',
+            address: '',
+            notes: '',
+          },
+          items: snapshotItems,
+          subtotal,
+          shippingAmount: 0,
+          discountAmount: 0,
+          totalAmount,
+          paymentMethod,
+          paymentStatus: 'VERIFIED',
+          paymentVerificationMethod: 'SELLER_MANUAL',
+          paymentVerifiedAt: new Date(),
+          paymentVerifiedBy: req.user.userId,
+          orderStatus: 'CONFIRMED',
+          statusHistory: [{
+            from: 'CONFIRMED',
+            to: 'CONFIRMED',
+            changedAt: new Date(),
+          }],
+        }], { session });
+
+        createdSale = persistedSale;
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: 'POS sale recorded successfully',
+        sale: {
+          _id: createdSale._id,
+          orderReference: createdSale.orderReference,
+          orderStatus: createdSale.orderStatus,
+          totalAmount: createdSale.totalAmount,
+          paymentMethod: createdSale.paymentMethod,
+          createdAt: createdSale.createdAt,
+        },
+      });
+    } catch (error) {
+      console.error('Create offline POS sale error:', error.message);
+      if (error.code === 11000) {
+        const duplicate = await Order.findOne({ sellerId: req.user.userId, clientRequestId: requestId, orderType: 'OFFLINE_POS' }).lean();
+        if (duplicate) {
+          return res.status(200).json({
+            success: true,
+            message: 'This POS sale was already recorded.',
+            sale: {
+              _id: duplicate._id,
+              orderReference: duplicate.orderReference,
+              orderStatus: duplicate.orderStatus,
+              totalAmount: duplicate.totalAmount,
+              paymentMethod: duplicate.paymentMethod,
+              createdAt: duplicate.createdAt,
+            },
+            idempotent: true,
+          });
+        }
+      }
+
+      return res.status(error.status || 500).json({
+        success: false,
+        message: error.status === 409 ? error.message : 'Unable to record POS sale',
+      });
+    } finally {
+      await session.endSession();
+    }
+  } catch (error) {
+    console.error('Offline POS validation error:', error.message);
+    return res.status(400).json({
+      success: false,
+      message: error.message || 'Unable to record POS sale',
+    });
+  }
+};
+
+export const getSellerPosSales = async (req, res) => {
+  try {
+    const requestedPage = Number.parseInt(req.query.page || '1', 10);
+    const requestedLimit = Number.parseInt(req.query.limit || '20', 10);
+    const page = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+    const limit = Number.isInteger(requestedLimit) && requestedLimit > 0 ? Math.min(50, requestedLimit) : 20;
+    const search = String(req.query.search || '').trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const paymentMethod = String(req.query.paymentMethod || '').trim().toUpperCase();
+    const status = String(req.query.status || '').trim().toUpperCase();
+    const fromDate = req.query.fromDate ? new Date(req.query.fromDate) : null;
+    const toDate = req.query.toDate ? new Date(req.query.toDate) : null;
+    if ((req.query.fromDate && Number.isNaN(fromDate?.getTime())) || (req.query.toDate && Number.isNaN(toDate?.getTime()))) {
+      return res.status(400).json({ success: false, message: 'Enter valid sale date filters.' });
+    }
+
+    const filter = { sellerId: req.user.userId, orderType: 'OFFLINE_POS' };
+
+    if (paymentMethod) filter.paymentMethod = paymentMethod;
+    if (status) filter.orderStatus = status;
+    if (fromDate && !Number.isNaN(fromDate.getTime())) filter.createdAt = { $gte: fromDate };
+    if (toDate && !Number.isNaN(toDate.getTime())) {
+      filter.createdAt = {
+        ...(filter.createdAt || {}),
+        $lte: toDate,
+      };
+    }
+
+    if (search) {
+      filter.$or = [
+        { orderReference: { $regex: search, $options: 'i' } },
+        { 'customer.name': { $regex: search, $options: 'i' } },
+        { 'items.name': { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const [sales, total] = await Promise.all([
+      Order.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Order.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      sales,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      total,
+    });
+  } catch (error) {
+    console.error('Get seller POS sales error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to load offline sales history',
+    });
+  }
+};
+
 export const createPublicOrder = async (req, res) => {
   try {
     const slug = normalizeStoreSlug(req.params.slug);
@@ -147,7 +472,7 @@ export const createPublicOrder = async (req, res) => {
     const seller = await Seller.findOne({
       storeSlug: slug,
       isPublished: true,
-      status: { $ne: 'suspended' },
+      status: 'active',
     }).lean();
 
     if (!seller) {
@@ -233,7 +558,7 @@ export const createPublicOrder = async (req, res) => {
     const productMap = new Map(products.map((product) => [String(product._id), product]));
     const snapshotItems = [];
     let subtotal = 0;
-    const stockUpdateQueue = [];
+    const stockUpdateQueue = new Map();
 
     for (const item of items) {
       const productId = String(item.productId || '');
@@ -248,7 +573,7 @@ export const createPublicOrder = async (req, res) => {
         });
       }
 
-      if (!Number.isInteger(quantity) || quantity < 1) {
+      if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 10_000_000) {
         return res.status(400).json({
           success: false,
           message: `Invalid quantity for ${product.name}`,
@@ -264,7 +589,8 @@ export const createPublicOrder = async (req, res) => {
 
       const lineTotal = Number(product.price || 0) * quantity;
       subtotal += lineTotal;
-      stockUpdateQueue.push({ productId: product._id, quantity });
+      const productKey = String(product._id);
+      stockUpdateQueue.set(productKey, (stockUpdateQueue.get(productKey) || 0) + quantity);
 
       snapshotItems.push({
         productId: product._id,
@@ -290,14 +616,19 @@ export const createPublicOrder = async (req, res) => {
       let createdOrder;
 
       await session.withTransaction(async () => {
-        for (const change of stockUpdateQueue) {
-          const result = await Product.updateOne(
-            { _id: change.productId, sellerId: seller.userId, stock: { $gte: change.quantity }, isPublished: true },
-            { $inc: { stock: -change.quantity } },
-            { session }
-          );
-          if (result.modifiedCount !== 1) {
-            const stockError = new Error("Stock changed while placing your order. Please refresh the store and try again.");
+        for (const [productId, quantity] of stockUpdateQueue) {
+          const result = await deductStock({
+            sellerId: seller.userId,
+            productId,
+            quantity,
+            reason: "Online sale",
+            referenceId: requestId,
+            movementType: "SALE",
+            idempotencyKey: `${requestId}:${productId}`,
+            session,
+          });
+          if (result.duplicate) {
+            const stockError = new Error("This order request has already consumed stock. Please refresh and retry.");
             stockError.status = 409;
             throw stockError;
           }
@@ -412,7 +743,7 @@ export const uploadPublicPaymentProof = async (req, res) => {
     const reference = String(req.params.reference || '');
     const token = String(req.query.token || '');
     if (!/^[A-Za-z0-9_-]{40,50}$/.test(token)) return res.status(404).json({ success: false, message: 'Payment upload link is invalid or expired.' });
-    const seller = await Seller.findOne({ storeSlug: slug, isPublished: true, status: { $ne: 'suspended' } }).select('userId storeSlug').lean();
+    const seller = await Seller.findOne({ storeSlug: slug, isPublished: true, status: 'active' }).select('userId storeSlug').lean();
     if (!seller) return res.status(404).json({ success: false, message: 'Store not found.' });
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     const order = await Order.findOne({
@@ -468,7 +799,7 @@ export const getPublicPaymentProof = async (req, res) => {
     const reference = String(req.query.reference || '');
     const token = String(req.query.token || '');
     if (!/^[A-Za-z0-9_-]{40,50}$/.test(token)) return res.status(404).send('Payment screenshot link is invalid or expired.');
-    const seller = await Seller.findOne({ storeSlug: slug, isPublished: true, status: { $ne: 'suspended' } }).select('userId').lean();
+    const seller = await Seller.findOne({ storeSlug: slug, isPublished: true, status: 'active' }).select('userId').lean();
     if (!seller) return res.status(404).send('Store not found.');
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     const order = await Order.findOne({
@@ -573,11 +904,38 @@ export const trackPublicOrder = async (req, res) => {
 
 export const getSellerOrders = async (req, res) => {
   try {
-    const orders = await Order.find({ sellerId: req.user.userId }).sort({ createdAt: -1 }).lean();
+    const requestedPage = Number.parseInt(req.query.page || "1", 10);
+    const requestedLimit = Number.parseInt(req.query.limit || "25", 10);
+    const page = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+    const limit = Number.isInteger(requestedLimit) && requestedLimit > 0 ? Math.min(requestedLimit, 100) : 25;
+    const filter = { sellerId: req.user.userId, orderType: { $ne: "OFFLINE_POS" } };
+    const status = String(req.query.status || "").toUpperCase();
+    const paymentStatus = String(req.query.paymentStatus || "").toUpperCase();
+    const allowedStatuses = ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED", "RETURNED"];
+    if (status && allowedStatuses.includes(status)) filter.orderStatus = status;
+    if (["PENDING", "VERIFIED", "FAILED"].includes(paymentStatus)) filter.paymentStatus = paymentStatus;
+    const fromDate = req.query.fromDate ? new Date(req.query.fromDate) : null;
+    const toDate = req.query.toDate ? new Date(req.query.toDate) : null;
+    if ((req.query.fromDate && Number.isNaN(fromDate?.getTime())) || (req.query.toDate && Number.isNaN(toDate?.getTime()))) {
+      return res.status(400).json({ success: false, message: "Enter valid order date filters." });
+    }
+    if (fromDate || toDate) filter.createdAt = { ...(fromDate ? { $gte: fromDate } : {}), ...(toDate ? { $lte: toDate } : {}) };
+    const search = String(req.query.search || "").trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (search) filter.$or = [
+      { orderReference: { $regex: search, $options: "i" } },
+      { "customer.name": { $regex: search, $options: "i" } },
+      { "customer.email": { $regex: search, $options: "i" } },
+      { "customer.phone": { $regex: search, $options: "i" } },
+    ];
+    const [orders, total] = await Promise.all([
+      Order.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      Order.countDocuments(filter),
+    ]);
 
     return res.status(200).json({
       success: true,
       orders,
+      pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
     });
   } catch (error) {
     console.error('Get seller orders error:', error.message);
@@ -630,50 +988,47 @@ export const updateSellerOrderStatus = async (req, res) => {
       }
 
       const previousStatus = order.orderStatus;
-      let cancellationClaimed = false;
-      if (nextStatus === 'CANCELLED' && previousStatus !== 'CANCELLED') {
+      if (nextStatus === previousStatus) {
+        updatedOrder = order;
+        return;
+      }
+      let terminalTransitionClaimed = false;
+      if (["CANCELLED", "RETURNED"].includes(nextStatus)) {
         const claim = await Order.updateOne(
-          { _id: order._id, sellerId: req.user.userId, orderStatus: { $ne: 'CANCELLED' } },
-          { $set: { orderStatus: 'CANCELLED' } },
+          { _id: order._id, sellerId: req.user.userId, orderStatus: previousStatus },
+          { $set: { orderStatus: nextStatus } },
           { session }
         );
         if (claim.modifiedCount !== 1) {
-          const alreadyCancelled = new Error('Order is already cancelled.');
-          alreadyCancelled.status = 409;
-          throw alreadyCancelled;
+          const conflict = new Error('Order status changed concurrently. Refresh and try again.');
+          conflict.status = 409;
+          throw conflict;
         }
-        cancellationClaimed = true;
-        for (const item of order.items) {
-          const result = await Product.updateOne(
-            { _id: item.productId, sellerId: req.user.userId },
-            { $inc: { stock: Number(item.quantity || 0) } },
-            { session }
-          );
-          if (result.matchedCount !== 1) {
-            throw new Error('An order product is no longer available; cancellation was not applied.');
-          }
+        terminalTransitionClaimed = true;
+        if (nextStatus === "CANCELLED") {
+          await restoreOrderInventory({ order, sellerId: req.user.userId, reason: "Order cancelled", movementType: "ORDER_CANCELLED", idempotencySuffix: "cancel", session });
+        } else if (nextStatus === "RETURNED") {
+          await restoreOrderInventory({ order, sellerId: req.user.userId, reason: "Order returned", movementType: "RETURN", idempotencySuffix: "return", session });
         }
       }
 
-      if (cancellationClaimed) {
-        order.orderStatus = 'CANCELLED';
-      } else {
-        order.orderStatus = nextStatus;
-      }
+      order.orderStatus = nextStatus;
       if (nextStatus === 'CANCELLED' && order.paymentStatus === 'PENDING') order.paymentStatus = 'FAILED';
       order.statusHistory.push({ from: previousStatus, to: nextStatus, changedAt: new Date() });
       await order.save({ session });
       updatedOrder = order;
 
-      await createNotification({
-        sellerId: req.user.userId,
-        type: "order_status_changed",
-        title: "Order status updated",
-        message: `Order ${order.orderReference} is now ${nextStatus.toLowerCase()}`,
-        data: { orderReference: order.orderReference, orderStatus: nextStatus, previousStatus },
-        link: `/orders/${order._id}`,
-        session,
-      });
+      if (terminalTransitionClaimed || nextStatus !== previousStatus) {
+        await createNotification({
+          sellerId: req.user.userId,
+          type: "order_status_changed",
+          title: "Order status updated",
+          message: `Order ${order.orderReference} is now ${nextStatus.toLowerCase()}`,
+          data: { orderReference: order.orderReference, orderStatus: nextStatus, previousStatus },
+          link: `/orders/${order._id}`,
+          session,
+        });
+      }
     });
 
     return res.status(200).json({

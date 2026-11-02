@@ -41,6 +41,11 @@ export default function AuthPage({ mode = "login" }) {
           return;
         }
 
+        if (result.user?.role === "admin") {
+          navigate("/admin", { replace: true });
+          return;
+        }
+
         let seller;
         try {
           ({ seller } = await getSellerProfile());
@@ -91,7 +96,7 @@ export default function AuthPage({ mode = "login" }) {
     <main className="sl-auth-page">
       <div className="sl-auth-frame">
         <header className="sl-auth-topbar">
-          <Link to="/" className="sl-brand" aria-label="Supply Link home">
+          <Link to="/sell" className="sl-brand" aria-label="Supply Link seller workspace home">
             <span className="sl-brand-mark"><Layers size={19} aria-hidden="true" /></span>
             <span className="sl-brand-copy"><strong>Supply Link</strong><small>SELLER WORKSPACE</small></span>
           </Link>

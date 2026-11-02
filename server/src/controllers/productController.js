@@ -6,6 +6,8 @@ import { getProductLimitForSeller } from "../utils/planEntitlements.js";
 import { isDatabaseWriteLimitReached } from "../utils/storageUsage.js";
 import { destroyCloudinaryImage, inspectUploadedImage, uploadImageToCloudinary } from "../services/mediaStorage.js";
 import { createNotification } from "./notificationController.js";
+import { manualStockCorrection } from "../services/inventoryService.js";
+import InventoryMovement from "../models/InventoryMovement.js";
 import crypto from "node:crypto";
 
 const isDatabaseAtWriteLimit = async () => {
@@ -35,7 +37,7 @@ const slugify = (value) => {
     .slice(0, 120) || "product";
 };
 
-const sanitizeProductPayload = (body) => {
+const sanitizeProductPayload = (body, { allowExistingVariantStock = false } = {}) => {
   const parsed = { ...body };
 
   parsed.name = String(parsed.name || "").trim();
@@ -79,7 +81,9 @@ const sanitizeProductPayload = (body) => {
   parsed.variants = parsed.variants.map((variant) => {
     const size = String(variant?.size || "").trim();
     const color = String(variant?.color || "").trim();
-    const stock = variant?.stock === undefined || variant?.stock === null ? undefined : Number(variant.stock);
+    const hasStock = variant?.stock !== undefined && variant?.stock !== null;
+    if (hasStock && !allowExistingVariantStock) throw new Error("Variant stock is not supported; use the product inventory adjustment.");
+    const stock = hasStock ? Number(variant.stock) : undefined;
     if (size.length > 60 || color.length > 60 || (stock !== undefined && (!Number.isInteger(stock) || stock < 0))) {
       throw new Error("Product variant details are invalid or too long.");
     }
@@ -179,10 +183,24 @@ export const createProduct = async (req, res) => {
 
       [createdProduct] = await Product.create([{
         ...payload,
+        stock: 0,
         sellerId: req.user.userId,
         slug: baseSlug,
         isPublished: payload.status === "published",
       }], { session });
+      if (payload.stock > 0) {
+        const initialInventory = await manualStockCorrection({
+          sellerId: req.user.userId,
+          productId: createdProduct._id,
+          targetStock: payload.stock,
+          reason: "Initial product inventory",
+          referenceId: String(createdProduct._id),
+          movementType: "MANUAL_ADJUSTMENT",
+          idempotencyKey: `product-create:${createdProduct._id}`,
+          session,
+        });
+        createdProduct.stock = initialInventory.product.stock;
+      }
     });
     await notifyPublicStore(req.user.userId);
 
@@ -209,6 +227,7 @@ export const updateProduct = async (req, res) => {
       return res.status(503).json({ success: false, message: "Product changes are temporarily paused while database capacity is prepared." });
     }
     let updatedProduct;
+    let inventoryAdjustment;
     await session.withTransaction(async () => {
       const product = await Product.findOne({ _id: req.params.id, sellerId: req.user.userId }).session(session);
       if (!product) {
@@ -218,7 +237,7 @@ export const updateProduct = async (req, res) => {
       }
 
       const editableFields = [
-        "name", "category", "description", "sku", "status", "price", "stock",
+        "name", "category", "description", "sku", "status", "price",
         "lowStockThreshold", "compareAtPrice", "images", "variants",
       ];
       const updates = Object.fromEntries(
@@ -226,8 +245,32 @@ export const updateProduct = async (req, res) => {
           .filter((field) => Object.prototype.hasOwnProperty.call(req.body, field))
           .map((field) => [field, req.body[field]])
       );
-      const payload = sanitizeProductPayload({ ...product.toObject(), ...updates });
+      if (Array.isArray(updates.variants) && updates.variants.some((variant) => Object.prototype.hasOwnProperty.call(variant || {}, "stock"))) {
+        const error = new Error("Variant stock cannot be edited directly; use the product inventory adjustment.");
+        error.status = 400;
+        throw error;
+      }
+      const payload = sanitizeProductPayload({ ...product.toObject(), ...updates }, { allowExistingVariantStock: true });
       const nextSlug = req.body.name ? slugify(req.body.name) : product.slug;
+
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "stock")) {
+        const targetStock = Number(req.body.stock);
+        if (!Number.isSafeInteger(targetStock) || targetStock < 0 || targetStock > 10_000_000) {
+          const error = new Error("Stock must be a whole number between 0 and 10,000,000.");
+          error.status = 400;
+          throw error;
+        }
+        inventoryAdjustment = await manualStockCorrection({
+          sellerId: req.user.userId,
+          productId: product._id,
+          targetStock,
+          reason: "Product edit stock update",
+          referenceId: String(req.body.referenceId || req.params.id),
+          movementType: "MANUAL_ADJUSTMENT",
+          idempotencyKey: String(req.get?.("Idempotency-Key") || req.body.idempotencyKey || crypto.randomUUID()),
+          session,
+        });
+      }
 
       if (nextSlug !== product.slug) {
         const duplicateProduct = await Product.findOne({
@@ -260,12 +303,15 @@ export const updateProduct = async (req, res) => {
         }
       }
 
-      Object.assign(product, payload, {
+      const { stock: _ignoredStock, ...productFields } = payload;
+      Object.assign(product, productFields, {
         slug: nextSlug,
         isPublished: payload.status === "published",
       });
       await product.save({ session });
-      updatedProduct = product;
+      updatedProduct = inventoryAdjustment
+        ? await Product.findOne({ _id: product._id, sellerId: req.user.userId }).session(session)
+        : product;
     });
     await notifyPublicStore(req.user.userId);
 
@@ -286,6 +332,7 @@ export const updateProduct = async (req, res) => {
 };
 
 export const updateInventory = async (req, res) => {
+  const session = await mongoose.startSession();
   try {
     if (await isDatabaseAtWriteLimit()) {
       return res.status(503).json({ success: false, message: "Inventory changes are temporarily paused while database capacity is prepared." });
@@ -295,33 +342,90 @@ export const updateInventory = async (req, res) => {
     if (hasStock === hasDelta) {
       return res.status(400).json({ success: false, message: "Provide exactly one of stock or delta" });
     }
+    if (hasDelta && !String(req.body.idempotencyKey || req.get?.("Idempotency-Key") || "").trim()) {
+      return res.status(400).json({ success: false, message: "Delta stock changes require a stable idempotency key." });
+    }
 
     const value = Number(hasStock ? req.body.stock : req.body.delta);
-    if (!Number.isSafeInteger(value) || Math.abs(value) > 10_000_000 || (hasStock && value < 0)) {
+    if (!Number.isSafeInteger(value) || Math.abs(value) > 10_000_000) {
       return res.status(400).json({ success: false, message: "Stock changes must be whole numbers between 0 and 10,000,000" });
     }
 
-    const filter = { _id: req.params.id, sellerId: req.user.userId };
-    const update = hasStock ? { $set: { stock: value } } : { $inc: { stock: value } };
-    if (!hasStock && value < 0) filter.stock = { $gte: -value };
-    const product = await Product.findOneAndUpdate(filter, update, { new: true, runValidators: true });
+    const reason = String(req.body.reason || (hasStock ? "Manual stock update" : "Inventory delta")).slice(0, 250);
+    const referenceId = String(req.body.referenceId || req.params.id || "");
+    const idempotencyKey = String(req.body.idempotencyKey || req.get?.("Idempotency-Key") || crypto.randomUUID()).trim();
+    if (idempotencyKey.length > 160) return res.status(400).json({ success: false, message: "Idempotency key is too long." });
 
-    if (!product) {
-      const exists = await Product.exists({ _id: req.params.id, sellerId: req.user.userId });
-      return res.status(exists ? 409 : 404).json({
-        success: false,
-        message: exists ? "Stock cannot become negative" : "Product not found",
-      });
-    }
+    let result;
+    await session.withTransaction(async () => {
+      let currentProduct;
+      if (hasStock) {
+        if (value < 0) {
+          throw Object.assign(new Error("Stock value cannot be negative"), { status: 400 });
+        }
+        currentProduct = await Product.findOne({ _id: req.params.id, sellerId: req.user.userId }).session(session);
+        if (!currentProduct) {
+          const error = new Error("Product not found");
+          error.status = 404;
+          throw error;
+        }
+        result = await manualStockCorrection({
+          sellerId: req.user.userId,
+          productId: req.params.id,
+          targetStock: value,
+          reason,
+          referenceId,
+          movementType: "MANUAL_ADJUSTMENT",
+          idempotencyKey,
+          session,
+        });
+      } else {
+        currentProduct = await Product.findOne({ _id: req.params.id, sellerId: req.user.userId }).select("stock").session(session).lean();
+        if (!currentProduct) {
+          const error = new Error("Product not found");
+          error.status = 404;
+          throw error;
+        }
+        const targetStock = Number(currentProduct.stock || 0) + value;
+        result = value >= 0
+          ? await manualStockCorrection({
+              sellerId: req.user.userId,
+              productId: req.params.id,
+              targetStock,
+              reason,
+              referenceId,
+              movementType: "RESTOCK",
+              idempotencyKey,
+              session,
+            })
+          : await manualStockCorrection({
+              sellerId: req.user.userId,
+              productId: req.params.id,
+              targetStock,
+              reason,
+              referenceId,
+              movementType: "STOCK_CORRECTION",
+              idempotencyKey,
+              session,
+            });
+      }
+
+      if (!result.product) {
+        const error = new Error("Product not found");
+        error.status = 404;
+        throw error;
+      }
+    });
+
     await notifyPublicStore(req.user.userId);
 
-    if (Number(product.stock) <= Number(product.lowStockThreshold || 5)) {
+    if (Number(result.product.stock) <= Number(result.product.lowStockThreshold || 5)) {
       createNotification({
         sellerId: req.user.userId,
         type: "stock_low",
         title: "Low stock alert",
-        message: `Product "${product.name}" is running low (${product.stock} left).`,
-        data: { productId: product._id, productName: product.name, stock: product.stock, threshold: product.lowStockThreshold },
+        message: `Product "${result.product.name}" is running low (${result.product.stock} left).`,
+        data: { productId: result.product._id, productName: result.product.name, stock: result.product.stock, threshold: result.product.lowStockThreshold },
         link: `/inventory`,
       }).catch((error) => console.error("Failed to create low stock notification:", error.message));
     }
@@ -329,14 +433,67 @@ export const updateInventory = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Inventory updated successfully",
-      product,
+      product: result.product,
+      movement: result.movement,
     });
   } catch (error) {
     console.error("Inventory update error:", error.message);
-    return res.status(error.name === "CastError" ? 404 : 500).json({
+    return res.status(error.status || (error.name === "CastError" ? 404 : 500)).json({
       success: false,
-      message: "Unable to update inventory",
+      message: error.status === 409 ? error.message : "Unable to update inventory",
     });
+  } finally {
+    await session.endSession();
+  }
+};
+
+export const listInventoryMovements = async (req, res) => {
+  try {
+    const rawPage = Number.parseInt(req.query.page || "1", 10);
+    const rawLimit = Number.parseInt(req.query.limit || "25", 10);
+    const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+    const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 100) : 25;
+    const filter = { sellerId: req.user.userId };
+    if (req.query.productId) filter.productId = req.query.productId;
+    if (req.query.type && ["SALE", "RESTOCK", "ORDER_CANCELLED", "MANUAL_ADJUSTMENT", "STOCK_CORRECTION", "RETURN"].includes(String(req.query.type).toUpperCase())) {
+      filter.movementType = String(req.query.type).toUpperCase();
+    }
+    const fromDate = req.query.fromDate ? new Date(req.query.fromDate) : null;
+    const toDate = req.query.toDate ? new Date(req.query.toDate) : null;
+    if ((req.query.fromDate && Number.isNaN(fromDate?.getTime())) || (req.query.toDate && Number.isNaN(toDate?.getTime()))) {
+      return res.status(400).json({ success: false, message: "Enter valid movement date filters." });
+    }
+    if (fromDate || toDate) filter.createdAt = { ...(fromDate ? { $gte: fromDate } : {}), ...(toDate ? { $lte: toDate } : {}) };
+    if (req.query.search) {
+      const search = String(req.query.search).trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (search) filter.$or = [{ reason: { $regex: search, $options: "i" } }, { referenceId: { $regex: search, $options: "i" } }];
+    }
+    const [rows, total] = await Promise.all([
+      InventoryMovement.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      InventoryMovement.countDocuments(filter),
+    ]);
+    const productIds = [...new Set(rows.map((row) => String(row.productId)))];
+    const products = productIds.length ? await Product.find({ _id: { $in: productIds }, sellerId: req.user.userId }).select("name category sku").lean() : [];
+    const productMap = new Map(products.map((product) => [String(product._id), product]));
+    return res.status(200).json({
+      success: true,
+      movements: rows.map((row) => ({
+        id: row._id,
+        productId: row.productId,
+        product: productMap.get(String(row.productId)) ? { name: productMap.get(String(row.productId)).name, category: productMap.get(String(row.productId)).category, sku: productMap.get(String(row.productId)).sku || "" } : null,
+        quantity: row.quantity,
+        movementType: row.movementType,
+        reason: row.reason,
+        referenceId: row.referenceId,
+        previousStock: row.previousStock,
+        newStock: row.newStock,
+        createdAt: row.createdAt,
+      })),
+      pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
+    });
+  } catch (error) {
+    console.error("Inventory movement history failed:", error.message);
+    return res.status(500).json({ success: false, message: "Unable to load inventory movement history." });
   }
 };
 

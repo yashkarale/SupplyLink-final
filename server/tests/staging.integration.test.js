@@ -5,9 +5,13 @@ import app from "../src/app.js";
 import User from "../src/models/User.js";
 import Seller from "../src/models/Seller.js";
 import Product from "../src/models/Product.js";
+import InventoryMovement from "../src/models/InventoryMovement.js";
 import Order from "../src/models/Order.js";
 import Notification from "../src/models/Notification.js";
 import AuthSession from "../src/models/AuthSession.js";
+import AdminAuditLog from "../src/models/AdminAuditLog.js";
+import { setAdminSellerStatus } from "../src/controllers/adminController.js";
+import { getPublicStore } from "../src/controllers/sellerController.js";
 import { summarizeOrderValues } from "../src/utils/customerMetrics.js";
 
 // Use the Mongoose instance already bound to the application models. A nested
@@ -192,6 +196,7 @@ describe.skipIf(!enabled)("staging MongoDB integration (requires explicit isolat
                 ],
               }),
           ],
+          ["inventory movements", () => InventoryMovement.deleteMany({ sellerId: { $in: ids.users } })],
           [
             "sellers",
             () =>
@@ -470,6 +475,68 @@ describe.skipIf(!enabled)("staging MongoDB integration (requires explicit isolat
     });
   });
 
+  it("suspends and reactivates a seller with atomic audit logs and public visibility", async () => {
+    const originalStatus = sellerA.status;
+    const invokeModeration = async (status) => {
+      const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+      await setAdminSellerStatus({ params: { id: String(sellerA._id) }, body: { status }, admin: { userId: sellerB.userId } }, res);
+      return res;
+    };
+    const suspended = await invokeModeration("suspended");
+    expect(suspended.statusCode).toBe(200);
+    expect(await AdminAuditLog.countDocuments({ actorUserId: sellerB.userId, targetSellerId: sellerA._id, action: "seller.suspend" })).toBe(1);
+    const hidden = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+    await getPublicStore({ params: { slug: sellerA.storeSlug } }, hidden);
+    expect(hidden.statusCode).toBe(404);
+
+    const reactivated = await invokeModeration("active");
+    expect(reactivated.statusCode).toBe(200);
+    expect(await AdminAuditLog.countDocuments({ actorUserId: sellerB.userId, targetSellerId: sellerA._id, action: "seller.reactivate" })).toBe(1);
+    const visible = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+    await getPublicStore({ params: { slug: sellerA.storeSlug } }, visible);
+    expect(visible.statusCode).toBe(200);
+
+    const originalAgain = await invokeModeration(originalStatus);
+    expect(originalAgain.statusCode).toBe(200);
+  });
+
+  it("restores returned online order stock once and records a RETURN movement", async () => {
+    const requestId = randomUUID();
+    ids.orderKeys.push({ sellerId: sellerA.userId, requestId });
+    await runWithServer(async (base) => {
+      const initialStock = (await Product.findById(productA._id)).stock;
+      const response = await submitOrder(base, sellerA.storeSlug, productA._id, requestId, 1);
+      expect(response.status).toBe(201);
+      const order = await Order.findOne({ sellerId: sellerA.userId, clientRequestId: requestId }).select("+clientRequestId");
+      ids.orders.push(order._id);
+      expect((await Product.findById(productA._id)).stock).toBe(initialStock - 1);
+      for (const orderStatus of ["CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "RETURNED"]) {
+        const update = await fetch(`${base}/api/orders/${order._id}/status`, { method: "PATCH", headers: authHeaders(sellerA.userId), body: JSON.stringify({ orderStatus }) });
+        expect(update.status).toBe(200);
+      }
+      expect((await Product.findById(productA._id)).stock).toBe(initialStock);
+      expect(await InventoryMovement.countDocuments({ sellerId: sellerA.userId, productId: productA._id, referenceId: order.orderReference, movementType: "RETURN" })).toBe(1);
+      const repeated = await fetch(`${base}/api/orders/${order._id}/status`, { method: "PATCH", headers: authHeaders(sellerA.userId), body: JSON.stringify({ orderStatus: "RETURNED" }) });
+      expect(repeated.status).toBe(200);
+      expect(await InventoryMovement.countDocuments({ sellerId: sellerA.userId, productId: productA._id, referenceId: order.orderReference, movementType: "RETURN" })).toBe(1);
+      expect((await Product.findById(productA._id)).stock).toBe(initialStock);
+    });
+  });
+
+  it("rolls back a seller status change when the moderation audit insert fails", async () => {
+    const originalStatus = sellerA.status;
+    const auditFailure = vi.spyOn(AdminAuditLog, "create").mockRejectedValueOnce(new Error("injected audit failure"));
+    const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+    try {
+      await setAdminSellerStatus({ params: { id: String(sellerA._id) }, body: { status: originalStatus === "suspended" ? "active" : "suspended" }, admin: { userId: sellerB.userId } }, res);
+      expect(res.statusCode).toBe(500);
+      expect((await Seller.findById(sellerA._id)).status).toBe(originalStatus);
+    } finally {
+      auditFailure.mockRestore();
+      await Seller.updateOne({ _id: sellerA._id }, { $set: { status: originalStatus } });
+    }
+  });
+
   it("applies competing inventory decrements atomically without going negative", async () => {
     const product = await Product.findOne({ sellerId: sellerA.userId, sku: { $regex: /^I-/ } });
     await runWithServer(async (base) => {
@@ -479,6 +546,68 @@ describe.skipIf(!enabled)("staging MongoDB integration (requires explicit isolat
       const responses = await Promise.all([update(), update()]);
       expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
       expect((await Product.findById(product._id)).stock).toBe(1);
+    });
+  });
+
+  it("routes product edit stock through the ledger and rolls back failed inventory transactions", async () => {
+    const sku = `EDIT-${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+    const product = await Product.create({
+      sellerId: sellerA.userId,
+      name: "Edited stock fixture",
+      slug: `edited-stock-${randomUUID().slice(0, 8)}`,
+      sku,
+      category: "test",
+      price: 75,
+      stock: 3,
+      status: "published",
+      isPublished: true,
+    });
+    ids.products.push(product._id);
+    ids.productSkus.push(sku);
+
+    await runWithServer(async (base) => {
+      const idempotencyKey = randomUUID();
+      const valid = await fetch(`${base}/api/products/${product._id}`, {
+        method: "PUT",
+        headers: authHeaders(sellerA.userId),
+        body: JSON.stringify({ stock: 6, price: 80, idempotencyKey }),
+      });
+      expect(valid.status).toBe(200);
+      expect(await Product.findById(product._id)).toMatchObject({ stock: 6, price: 80 });
+      expect(await InventoryMovement.findOne({ sellerId: sellerA.userId, productId: product._id, idempotencyKey }))
+        .toMatchObject({ quantity: 3, previousStock: 3, newStock: 6, movementType: "MANUAL_ADJUSTMENT" });
+
+      const invalid = await fetch(`${base}/api/products/${product._id}`, {
+        method: "PUT",
+        headers: authHeaders(sellerA.userId),
+        body: JSON.stringify({ stock: 1.5 }),
+      });
+      expect(invalid.status).toBe(400);
+      expect((await Product.findById(product._id)).stock).toBe(6);
+
+      const foreignSellerEdit = await fetch(`${base}/api/products/${product._id}`, {
+        method: "PUT",
+        headers: authHeaders(sellerB.userId),
+        body: JSON.stringify({ stock: 9 }),
+      });
+      expect(foreignSellerEdit.status).toBe(404);
+      expect((await Product.findById(product._id)).stock).toBe(6);
+
+      const beforeFailureCount = await InventoryMovement.countDocuments({ sellerId: sellerA.userId, productId: product._id });
+      const failLedgerWrite = vi.spyOn(InventoryMovement, "create").mockRejectedValueOnce(new Error("injected ledger failure"));
+      let failed;
+      try {
+        failed = await fetch(`${base}/api/products/${product._id}`, {
+          method: "PUT",
+          headers: authHeaders(sellerA.userId),
+          body: JSON.stringify({ stock: 9, idempotencyKey: randomUUID() }),
+        });
+      } finally {
+        failLedgerWrite.mockRestore();
+      }
+      expect(failed.status).toBe(500);
+      expect((await Product.findById(product._id)).stock).toBe(6);
+      expect(await InventoryMovement.countDocuments({ sellerId: sellerA.userId, productId: product._id })).toBe(beforeFailureCount);
     });
   });
 

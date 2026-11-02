@@ -1,24 +1,31 @@
 # Supply Link
 
-Supply Link is a seller storefront and operations application for small businesses and social-commerce sellers. The repository contains a React frontend and Express API. The client can call an optional external ML service, but that service is not included in this repository.
+Supply Link is a seller-first commerce platform with a React frontend, Express backend, MongoDB data layer, public marketplace discovery, seller storefronts, online checkout, offline POS sales, and unified analytics. This repository is organized as a multi-tenant seller SaaS with a public marketplace and seller-only dashboard.
 
 ## Stack
 
 - Frontend: React + Vite + JavaScript
-- Backend: Express + MongoDB + JWT auth
-- Optional ML integration: external HTTP service configured with `VITE_ML_URL` (not included or verified here)
-- Styling: Tailwind CSS
-- Testing: Vitest / Node test runner
+- Backend: Express + MongoDB + JWT session auth
+- Data layer: Mongoose models, inventory ledger, order snapshots, public store routes
+- Integrations: Resend email, Razorpay billing, Cloudinary image upload, optional ML service
+- Testing: Vitest for backend and frontend regression tests
 
 ## Repository structure
 
-- `client/` - React dashboard and storefront UI
-- `server/` - Express API + Mongo models + auth middleware
-- `docs/` - Docker and project docs
+- `client/` — seller dashboard, storefront UI, analytics, POS flows
+- `server/` — API, middleware, controllers, migrations/scripts, tests
+- `docs/` — deployment and infrastructure notes
+- `ml-service/` — optional ML service, not part of the core deployment path
 
-## Quick start
+## Local development
 
-### 1. Backend
+### 1. Start MongoDB
+
+```bash
+docker compose -f docs/docker-compose.yml up -d
+```
+
+### 2. Backend
 
 ```bash
 cd server
@@ -27,7 +34,7 @@ npm install
 npm run dev
 ```
 
-### 2. Frontend
+### 3. Frontend
 
 ```bash
 cd client
@@ -35,59 +42,104 @@ npm install
 npm run dev
 ```
 
-### 3. Dockerized MongoDB
+### 4. Health checks
 
-```bash
-docker compose -f docs/docker-compose.yml up -d
-```
+- API health: `http://localhost:5000/api/health`
+- Database readiness: `http://localhost:5000/api/ready`
 
-## Required env
+## Architecture overview
 
-Create a `.env` file in the server folder with values like:
+- Public marketplace routes expose only published sellers and published products.
+- Seller-only routes are protected by JWT auth and session validation.
+- Seller ownership and tenant isolation are enforced through sellerId checks on product, order, and dashboard operations.
+- Orders store a snapshot of product and customer data to preserve historical analytics even if catalog data changes.
+- Stock mutation is centralized through `server/src/services/inventoryService.js` and not through direct `Product.findOneAndUpdate` writes from controllers.
+- Offline POS uses the same Order collection with `orderType: 'OFFLINE_POS'`, while public checkout uses `orderType: 'ONLINE'`.
+- Analytics use revenue classification logic and rely on order status and payment status rather than raw totals alone.
+
+## Environment variable checklist
+
+Create a production-safe `.env` file in the server folder. The repository includes a working example in `server/.env.example`.
+
+Required values:
 
 ```env
 PORT=5000
 CLIENT_URL=http://localhost:5173
-MONGODB_URI=mongodb://localhost:27017/supplylink?replicaSet=rs0
-JWT_SECRET=replace-with-a-long-random-secret
+API_PUBLIC_URL=http://localhost:5000
+MONGODB_URI=mongodb://localhost:27017/supplylink
+JWT_SECRET=replace-with-a-long-random-secret-at-least-32-chars
 JWT_EXPIRES_IN=1d
 NODE_ENV=development
+MONGODB_ORDER_WRITE_LIMIT_MB=350
 RAZORPAY_KEY_ID=
 RAZORPAY_KEY_SECRET=
 RESEND_API_KEY=
+RESEND_WEBHOOK_SECRET=
 EMAIL_FROM=Supply Link <orders@example.com>
 APP_BASE_URL=http://localhost:5173
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
 ```
 
-New seller signups require email ownership verification through Resend. Configure `RESEND_API_KEY`, a verified `EMAIL_FROM`, and `APP_BASE_URL` as the deployed frontend HTTPS origin on the server. New accounts cannot sign in before verifying the email link (valid for 24 hours); the login page can resend a link. Existing accounts are kept usable for this rollout. Keep the email provider key in the server's secret store.
+Production rules:
 
-Paid subscriptions require Razorpay test or live credentials. Paid plans stay unavailable until both keys are configured; payment verification checks the signature and the Razorpay order's seller, plan, amount, and currency. Keep the key secret in the server's deployment secret store. Serve the frontend and API over HTTPS in production, and set `CLIENT_URL` to the allowed frontend origin(s).
+- `JWT_SECRET` must be at least 32 characters and unique.
+- `CLIENT_URL` must be HTTPS in production and can accept multiple origins separated by commas.
+- `APP_BASE_URL` must be the HTTPS frontend origin used for email verification links.
+- `MONGODB_URI` must point to a MongoDB replica-capable cluster for transaction-safe stock/order writes.
+- Cloudinary keys are required for QR and proof uploads; the app fails closed without them.
+- Resend and Razorpay values are required for email verification and plan/billing flows.
 
-The public store API omits seller phone and WhatsApp values. Contact clicks resolve the seller on the server and redirect to WhatsApp. WhatsApp requires the recipient identifier in its destination URL, so a determined visitor can still see it there. Fully concealing it requires a WhatsApp Business Platform backend integration and its credentials.
+## API overview
 
-WhatsApp numbers must use international format (for India, `+91` plus a valid 10-digit mobile number). A valid number format does not prove the number has an active WhatsApp account. Storefront WhatsApp messages are inquiries only; checkout is the separate persisted order workflow.
+- `/api/auth/*` — registration, email verification, login, logout, session validation
+- `/api/sellers/*` — seller onboarding, store settings, dashboard, customer summary, public store metadata
+- `/api/products/*` — seller-managed catalog and inventory operations
+- `/api/orders/*` — public order checkout, POS sales, tracking, seller order status updates
+- `/api/billing/*` — subscription plans and payment verification
+- `/api/marketplace/*` — public discovery of sellers and products
+- `/api/store/*` — public store pages and WhatsApp/contact flows
+- `/api/webhooks/*` — external provider callbacks
 
-Order notification email is optional and uses the Resend API. Account verification is required for registration and login and uses the same provider configuration. Configure a verified sender domain and production `APP_BASE_URL`. Without these values, new registrations fail closed rather than allowing unverified addresses. When Resend accepts an email request, this still does not prove inbox delivery. The signed webhook endpoint can record provider delivery events after `RESEND_WEBHOOK_SECRET` is configured, but it has not been tested with a live provider account and there is no durable retry queue.
+## Testing
 
-For deployment, set `VITE_API_URL` to the HTTPS API base in the client build environment (or use the same-origin `/api` default), and set `VITE_ML_URL` only when an HTTPS ML service is deployed. The backend refuses to start without `MONGODB_URI` and a 32-character `JWT_SECRET`; in production it also requires HTTPS `CLIENT_URL` origins. MongoDB transactions used for product limits, order stock, and subscription persistence require a replica set; the local Docker configuration starts a single-node replica set. Back up and review existing data before running `npm run migrate` to create/verify indexes.
+Run the repo tests before making production changes:
 
-## Current status
+```bash
+cd server && npm test
+cd client && npm test -- --run
+```
 
-Core seller, catalog, storefront, order, tracking, and seller-plan code exists, but the project is **not production-ready**. Integration gaps include live database/provider verification, durable notifications, payment webhooks/renewals, image storage, cross-instance realtime, browser E2E, and full multi-seller security tests. Read `SUPPLY_LINK_AUDIT.md`, `SUPPLY_LINK_BUG_REPORT.md`, and `SUPPLY_LINK_RELEASE_CHECKLIST.md` before staging.
+This project has a mix of real backend assertions and route-level checks, but some external integrations remain environment-dependent and are not considered production-verified without a live service configuration.
 
-The Free plan currently allows two non-archived products. The server checks app database logical size before accepting new checkout orders, creating paid Razorpay orders, or saving product/inventory changes; `MONGODB_ORDER_WRITE_LIMIT_MB` defaults to 350 MiB. This is a safety stop, not an order-count guarantee. Run `cd server && npm run storage:report` against the target database and remember Atlas's free quota covers the entire cluster, not just this app database.
+## Deployment procedure
 
-## Project guides
+1. Prepare a MongoDB Atlas or replica-capable MongoDB cluster.
+2. Configure backend environment variables from `server/.env.example`.
+3. Set `CLIENT_URL` explicitly to the HTTPS frontend domain and allow the API origin for CORS.
+4. Set `APP_BASE_URL` to the live frontend URL used for email links.
+5. Build the frontend against the deployed API URL.
+6. Start the backend with a valid `MONGODB_URI` and `JWT_SECRET`.
+7. Confirm `/api/health` and `/api/ready` respond successfully.
+8. Verify seller onboarding, store publishing, product creation, and order flows in staging before production.
+9. Keep secrets in the deployment platform secret store; do not commit them to the repo.
 
-- `SUPPLY_LINK_COMPLETE_GUIDE.md` - architecture, files, data flow, and debugging.
-- `SUPPLY_LINK_BUSINESS_WORKFLOW.md` - platform, seller, and buyer operating flows.
-- `SUPPLY_LINK_UI_UX_REVIEW.md` - UI findings and browser verification limits.
-- `SUPPLY_LINK_CAPACITY_AND_COSTS.md` - schema-based storage estimates and current vendor references.
-- `SUPPLY_LINK_BUSINESS_MODEL.md` - scenario assumptions and illustrative unit economics.
-- `DEPLOYMENT.md` - environment and staging steps.
-- `LAUNCH_CHECKLIST.md` - verified, failed, blocked, and untested launch checks.
+## Known limitations
 
-## Important note
+- No production deployment is executed as part of this repository review.
+- Live email and payment provider flows require real credentials and can fail if not configured correctly.
+- Order expiry, payment webhook handling, and file storage rely on external services and should be treated as operationally sensitive.
+- The codebase is not a full SaaS platform rewrite; it is a working seller commerce implementation that requires operational hardening before production rollout.
 
-Do not commit real secrets or production credentials. Use `.env` only for local development and load real values from a secure deployment platform when going live.
-"# SupplyLink-final" 
+## Important constraints
+
+- Do not deploy from this workspace.
+- Do not modify production data.
+- Do not change subscription pricing.
+- Do not add new product features in this phase.
+- Preserve the current Paper & Ledger design system.
+
+For additional operational guidance, see the deployment notes in `docs/` and the server `README` for the environment checklist.
+

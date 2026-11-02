@@ -7,9 +7,11 @@ import { sendVerificationEmail } from "../services/emailService.js";
 import User from "../models/User.js";
 import AuthSession from "../models/AuthSession.js";
 
-export const register = async (req, res) => {
+const registerAccount = async (req, res, role = "seller") => {
   try {
     const { name, email, password } = req.body;
+    const phone = typeof req.body?.phone === "string" ? req.body.phone.trim() : "";
+    const normalizedPhone = phone.replace(/[\s()-]/g, "");
 
     if (
       typeof name !== "string" ||
@@ -17,7 +19,8 @@ export const register = async (req, res) => {
       typeof password !== "string" ||
       !name.trim() ||
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) ||
-      password.length < 8
+      password.length < 8 ||
+      (role === "customer" && phone && !/^\+[1-9]\d{6,14}$/.test(normalizedPhone))
     ) {
       return res.status(400).json({
         message: "Enter a name, valid email, and password of at least 8 characters"
@@ -48,13 +51,15 @@ export const register = async (req, res) => {
     const user = await User.create({
       name: name.trim(),
       email: normalizedEmail,
+      ...(role === "customer" ? { phone: normalizedPhone } : {}),
       password: hashedPassword,
+      role,
       emailVerified: false,
       emailVerificationTokenHash: hashEmailVerificationToken(verificationToken),
       emailVerificationExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     });
 
-    const emailResult = await sendVerificationEmail({ to: normalizedEmail, token: verificationToken });
+    const emailResult = await sendVerificationEmail({ to: normalizedEmail, token: verificationToken, accountRole: role });
     if (emailResult.status !== "accepted") {
       await User.deleteOne({ _id: user._id, emailVerified: false });
       return res.status(503).json({
@@ -81,6 +86,9 @@ export const register = async (req, res) => {
     });
   }
 };
+
+export const register = (req, res) => registerAccount(req, res, "seller");
+export const registerCustomer = (req, res) => registerAccount(req, res, "customer");
 
 export const verifyEmail = async (req, res) => {
   const token = req.body?.token;
@@ -128,7 +136,7 @@ export const resendVerificationEmail = async (req, res) => {
     }
 
     const verificationToken = createEmailVerificationToken();
-    const emailResult = await sendVerificationEmail({ to: email, token: verificationToken });
+    const emailResult = await sendVerificationEmail({ to: email, token: verificationToken, accountRole: user.role });
     if (emailResult.status !== "accepted") {
       return res.status(503).json({ success: false, message: "We could not send the verification email. Please try again later." });
     }
